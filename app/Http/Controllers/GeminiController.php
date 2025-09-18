@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Services\GeminiExportService;
 use App\Models\Product;
 
 class GeminiController extends Controller
@@ -69,7 +70,7 @@ class GeminiController extends Controller
     public function recommendations(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $request->input('user_id') ?: auth()->id();
             $productId = $request->input('product_id');
             $cartItems = $request->input('cart_items', []);
             $context = $request->input('context', 'homepage'); // homepage, product_view, cart
@@ -91,9 +92,27 @@ class GeminiController extends Controller
             // Build comprehensive AI context for logged-in users
             $aiContext = $this->buildAIRecommendationContext($userId, $productId, $cartItems, $context, $allProducts);
             
+            // Prepare request data for export
+            $requestData = [
+                'user_id' => $userId,
+                'product_id' => $productId,
+                'cart_items' => $cartItems,
+                'context' => $context,
+                'total_products_available' => count($allProducts),
+                'user_profile' => $this->getUserProfile($userId)
+            ];
+            
             // Get AI recommendations
             $apiKey = config('ai.gemini.api_key');
             if (!$apiKey) {
+                // Export fallback call
+                GeminiExportService::exportCall(
+                    $requestData,
+                    $aiContext,
+                    ['fallback_used' => true, 'reason' => 'no_api_key'],
+                    $context
+                );
+                
                 // Fallback to algorithm-based recommendations
                 return $this->getFallbackRecommendations($allProducts, $productId, $cartItems, $context);
             }
@@ -108,6 +127,7 @@ class GeminiController extends Controller
                 ],
             ];
             
+            // Make API call
             $response = Http::asJson()->post($endpoint.'?key='.$apiKey, $payload);
             $responseData = $response->json();
             
@@ -123,8 +143,28 @@ class GeminiController extends Controller
                 }
             }
             
+            // Prepare response data for export
+            $exportResponseData = [
+                'raw_response' => $responseData,
+                'extracted_response' => $aiResponse,
+                'parsed_product_ids' => $recommendedIds,
+                'success' => !empty($recommendedIds)
+            ];
+            
+            // Export the AI call
+            $exportPath = GeminiExportService::exportCall(
+                $requestData,
+                $aiContext,
+                $exportResponseData,
+                $context
+            );
+            
             // If AI didn't return valid IDs, use fallback
             if (empty($recommendedIds)) {
+                Log::warning('AI returned no valid product IDs, using fallback', [
+                    'ai_response' => $aiResponse,
+                    'export_path' => $exportPath
+                ]);
                 return $this->getFallbackRecommendations($allProducts, $productId, $cartItems, $context);
             }
             
@@ -137,11 +177,28 @@ class GeminiController extends Controller
             return response()->json([
                 'recommendations' => $recommendations,
                 'source' => 'ai',
-                'personalized' => true
+                'personalized' => true,
+                'export_path' => $exportPath
             ]);
             
         } catch (\Exception $e) {
             Log::error('AI Recommendations Error: ' . $e->getMessage());
+            
+            // Export error call
+            $requestData = [
+                'user_id' => $request->input('user_id'),
+                'product_id' => $request->input('product_id'),
+                'cart_items' => $request->input('cart_items', []),
+                'context' => $request->input('context', 'homepage'),
+                'error' => $e->getMessage()
+            ];
+            
+            GeminiExportService::exportCall(
+                $requestData,
+                'Error occurred during AI recommendation generation',
+                ['error' => $e->getMessage(), 'fallback_used' => true],
+                $request->input('context', 'homepage')
+            );
             
             // Fallback to simple recommendations
             return $this->getFallbackRecommendations([], $request->input('product_id'), $request->input('cart_items', []), $request->input('context', 'homepage'));
@@ -363,40 +420,94 @@ class GeminiController extends Controller
     {
         // Simple fallback algorithm
         $recommendations = [];
+        $algorithm = 'random';
         
         if (empty($allProducts)) {
             // Get random products from database as fallback
             $recommendations = Product::inRandomOrder()->take(4)->get()->toArray();
+            $algorithm = 'database_random';
         } else {
-            // Simple algorithm: recommend products from same category or random
+            // Get current product and its category
             $currentProduct = collect($allProducts)->firstWhere('id', $productId);
             $category = $currentProduct['category'] ?? null;
             
-            if ($category) {
-                $recommendations = collect($allProducts)
+            // For product detail pages, prioritize category-based recommendations
+            if ($context === 'product_view' && $category && $productId) {
+                // Get all products from the same category (excluding current product)
+                $categoryProducts = collect($allProducts)
                     ->where('category', $category)
                     ->where('id', '!=', $productId)
-                    ->take(2)
                     ->values()
                     ->toArray();
+                
+                if (count($categoryProducts) >= 4) {
+                    // If we have enough products in the category, use only category products
+                    $recommendations = collect($categoryProducts)
+                        ->random(4)
+                        ->values()
+                        ->toArray();
+                    $algorithm = 'category_random';
+                } else {
+                    // If not enough category products, use all available category products
+                    $recommendations = $categoryProducts;
+                    $algorithm = 'category_partial';
+                }
+            } else {
+                // For other contexts (homepage, cart), use mixed approach
+                if ($category) {
+                    $recommendations = collect($allProducts)
+                        ->where('category', $category)
+                        ->where('id', '!=', $productId)
+                        ->take(2)
+                        ->values()
+                        ->toArray();
+                    $algorithm = 'category_based';
+                }
             }
             
-            // Fill remaining slots with random products
+            // Fill remaining slots with random products (only if not product_view context)
             $remaining = 4 - count($recommendations);
-            if ($remaining > 0) {
+            if ($remaining > 0 && $context !== 'product_view') {
                 $randomProducts = collect($allProducts)
                     ->where('id', '!=', $productId)
                     ->random($remaining)
                     ->values()
                     ->toArray();
                 $recommendations = array_merge($recommendations, $randomProducts);
+                $algorithm = $algorithm === 'category_based' ? 'category_based_with_random' : 'random';
             }
         }
+        
+        // Export fallback recommendation data
+        $requestData = [
+            'product_id' => $productId,
+            'cart_items' => $cartItems,
+            'context' => $context,
+            'total_products_available' => count($allProducts),
+            'algorithm_used' => $algorithm
+        ];
+        
+        $fallbackPrompt = "Fallback recommendation algorithm used: {$algorithm}. " .
+                         "Context: {$context}. " .
+                         "Product ID: " . ($productId ?? 'none') . ". " .
+                         "Cart items: " . count($cartItems) . " items.";
+        
+        GeminiExportService::exportCall(
+            $requestData,
+            $fallbackPrompt,
+            [
+                'recommendations' => $recommendations,
+                'algorithm' => $algorithm,
+                'fallback_used' => true
+            ],
+            $context
+        );
         
         return response()->json([
             'recommendations' => $recommendations,
             'source' => 'fallback',
-            'personalized' => false
+            'personalized' => false,
+            'algorithm' => $algorithm
         ]);
     }
     

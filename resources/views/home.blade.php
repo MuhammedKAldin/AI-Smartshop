@@ -69,6 +69,7 @@
                             <div class="flex items-center justify-between">
                                 <span class="text-2xl font-bold text-indigo-600" x-text="'$' + product.price"></span>
                                 <button @click.stop="addToCart(product)"
+                                        :data-product-id="product.id"
                                         class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-300">
                                     🛒 Add to Cart
                                 </button>
@@ -116,6 +117,7 @@
                             <div class="flex items-center justify-between">
                                 <span class="text-2xl font-bold text-indigo-600" x-text="'$' + recommendation.price"></span>
                                 <button @click.stop="addToCart(recommendation)"
+                                        :data-product-id="recommendation.id"
                                         class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-300">
                                     🛒 Add to Cart
                                 </button>
@@ -252,14 +254,28 @@ document.addEventListener('alpine:init', () => {
 
                 if (response.ok) {
                     const data = await response.json();
-                    this.items = data.cart_items;
-                    this.updateCartCount();
                     
-                    // Track add to cart interaction
-                    this.trackUserInteraction(product.id, 'add_to_cart');
-                    
-                    // Show success message
-                    this.showNotification('✅ Product added to cart!');
+                    if (data.success) {
+                        this.items = data.cart_items;
+                        this.updateCartCount();
+                        
+                        // Dispatch cart updated event for layout
+                        window.dispatchEvent(new CustomEvent('cartUpdated'));
+                        
+                        // Track add to cart interaction
+                        this.trackUserInteraction(product.id, 'add_to_cart');
+                        
+                        // Show success message
+                        this.showNotification('✅ Product added to cart!');
+                    } else {
+                        // Handle stock validation error
+                        if (data.error_type === 'stock_issue') {
+                            this.showStockError(data.error);
+                            this.disableAddToCartButton(product.id);
+                        } else {
+                            this.showNotification('❌ ' + data.error, 'error');
+                        }
+                    }
                 } else {
                     throw new Error('Failed to add to cart');
                 }
@@ -287,6 +303,27 @@ document.addEventListener('alpine:init', () => {
             setTimeout(() => {
                 notification.remove();
             }, 3000);
+        },
+        
+        showStockError(message) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Item Out of Stock',
+                text: message,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#f59e0b'
+            });
+        },
+        
+        disableAddToCartButton(productId) {
+            // Find and disable the add to cart button for this product
+            const buttons = document.querySelectorAll(`[data-product-id="${productId}"]`);
+            buttons.forEach(button => {
+                button.disabled = true;
+                button.textContent = 'Out of Stock';
+                button.classList.add('bg-gray-400', 'cursor-not-allowed');
+                button.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+            });
         },
         
         async trackUserInteraction(productId, interactionType) {

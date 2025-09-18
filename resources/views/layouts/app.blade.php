@@ -159,15 +159,40 @@
             Alpine.data('layout', () => ({
                 cartCount: 0,
                 
-                init() {
-                    this.loadCartCount();
+                async init() {
+                    await this.loadCartCount();
+                    // Listen for cart updates from other components
+                    window.addEventListener('cartUpdated', () => {
+                        this.loadCartCount();
+                    });
                 },
                 
-                loadCartCount() {
-                    const cart = localStorage.getItem('cart');
-                    if (cart) {
-                        const items = JSON.parse(cart);
-                        this.cartCount = items.reduce((total, item) => total + item.quantity, 0);
+                async loadCartCount() {
+                    try {
+                        const response = await fetch('/cart/data');
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.cartCount = data.cart_item_count || 0;
+                        } else {
+                            // Fallback to localStorage for guests
+                            const cart = localStorage.getItem('cart');
+                            if (cart) {
+                                const items = JSON.parse(cart);
+                                this.cartCount = items.reduce((total, item) => total + item.quantity, 0);
+                            } else {
+                                this.cartCount = 0;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error loading cart count:', error);
+                        // Fallback to localStorage
+                        const cart = localStorage.getItem('cart');
+                        if (cart) {
+                            const items = JSON.parse(cart);
+                            this.cartCount = items.reduce((total, item) => total + item.quantity, 0);
+                        } else {
+                            this.cartCount = 0;
+                        }
                     }
                 }
             }));

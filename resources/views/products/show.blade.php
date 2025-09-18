@@ -182,8 +182,8 @@ document.addEventListener('alpine:init', () => {
         recommendations: [],
         loadingRecommendations: false,
         
-        init() {
-            this.loadCart();
+        async init() {
+            await this.loadCart();
             this.loadProduct();
             this.loadRecommendations();
             
@@ -195,10 +195,27 @@ document.addEventListener('alpine:init', () => {
             }, 100);
         },
         
-        loadCart() {
-            const cart = localStorage.getItem('cart');
-            if (cart) {
-                this.items = JSON.parse(cart);
+        async loadCart() {
+            try {
+                const response = await fetch('/cart/data');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.items = data.cart_items;
+                } else {
+                    // Fallback to localStorage for guests
+                    const cart = localStorage.getItem('cart');
+                    if (cart) {
+                        this.items = JSON.parse(cart);
+                    }
+                }
+                this.updateCartCount();
+            } catch (error) {
+                console.error('Error loading cart:', error);
+                // Fallback to localStorage
+                const cart = localStorage.getItem('cart');
+                if (cart) {
+                    this.items = JSON.parse(cart);
+                }
                 this.updateCartCount();
             }
         },
@@ -301,34 +318,68 @@ document.addEventListener('alpine:init', () => {
             }
         },
         
-        addToCartWithQuantity() {
-            const productToAdd = {
-                ...this.product,
-                quantity: this.quantity
-            };
-            
-            const existingItem = this.items.find(item => item.id === productToAdd.id);
-            if (existingItem) {
-                existingItem.quantity += this.quantity;
-            } else {
-                this.items.push(productToAdd);
+        async addToCartWithQuantity() {
+            try {
+                const response = await fetch('/cart/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({
+                        product_id: this.product.id,
+                        quantity: this.quantity
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.items = data.cart_items;
+                    this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
+                    
+                    this.showNotification('Product added to cart!');
+                } else {
+                    throw new Error('Failed to add to cart');
+                }
+            } catch (error) {
+                console.error('Error adding to cart:', error);
+                this.showNotification('❌ Failed to add product to cart');
             }
-            
-            this.saveCart();
-            this.updateCartCount();
-            this.showNotification('Product added to cart!');
         },
         
-        addToCart(product) {
-            const existingItem = this.items.find(item => item.id === product.id);
-            if (existingItem) {
-                existingItem.quantity += 1;
-            } else {
-                this.items.push({...product, quantity: 1});
+        async addToCart(product) {
+            try {
+                const response = await fetch('/cart/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({
+                        product_id: product.id,
+                        quantity: 1
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.items = data.cart_items;
+                    this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
+                    
+                    this.showNotification('Product added to cart!');
+                } else {
+                    throw new Error('Failed to add to cart');
+                }
+            } catch (error) {
+                console.error('Error adding to cart:', error);
+                this.showNotification('❌ Failed to add product to cart');
             }
-            this.saveCart();
-            this.updateCartCount();
-            this.showNotification('Product added to cart!');
         },
         
         saveCart() {

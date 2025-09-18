@@ -186,6 +186,20 @@ document.addEventListener('alpine:init', () => {
             // Clear cart if redirected from successful payment
             @if(session('payment_success'))
                 await this.clearCart();
+                @if(session('order_number'))
+                    this.showNotification('Order Number: {{ session('order_number') }}');
+                @endif
+            @endif
+            
+            // Check for stock error messages
+            @if(session('error'))
+                this.showStockError('{{ session('error') }}');
+            @endif
+            
+            @if(session('out_of_stock_items'))
+                const outOfStockItems = @json(session('out_of_stock_items'));
+                const itemNames = outOfStockItems.map(item => item.name).join(', ');
+                this.showStockError(`The following items were removed from your cart: ${itemNames}`);
             @endif
         },
         
@@ -214,42 +228,55 @@ document.addEventListener('alpine:init', () => {
             }
         },
         
-        async updateQuantity(productId, quantity) {
-            try {
-                const response = await fetch('/cart/update', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                    },
-                    body: JSON.stringify({
-                        product_id: productId,
-                        quantity: quantity
-                    })
-                });
+    async updateQuantity(productId, quantity) {
+        try {
+            const response = await fetch('/cart/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                },
+                body: JSON.stringify({
+                    product_id: productId,
+                    quantity: quantity
+                })
+            });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    this.items = data.cart_items;
-                    this.updateCartCount();
-                } else {
-                    throw new Error('Failed to update quantity');
-                }
-            } catch (error) {
-                console.error('Error updating quantity:', error);
-                // Fallback to local update
-                const item = this.items.find(item => item.id === productId);
-                if (item) {
-                    if (quantity <= 0) {
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                this.items = data.cart_items;
+                this.updateCartCount();
+                
+                // Dispatch cart updated event for layout
+                window.dispatchEvent(new CustomEvent('cartUpdated'));
+            } else {
+                // Handle stock issues
+                if (data.error_type === 'stock_issue') {
+                    this.showStockError(data.error);
+                    // Remove the item from cart if out of stock
+                    if (quantity > 0) {
                         this.removeFromCart(productId);
-                    } else {
-                        item.quantity = quantity;
-                        this.saveCart();
-                        this.updateCartCount();
                     }
+                } else {
+                    throw new Error(data.error || 'Failed to update quantity');
                 }
             }
-        },
+        } catch (error) {
+            console.error('Error updating quantity:', error);
+            // Fallback to local update
+            const item = this.items.find(item => item.id === productId);
+            if (item) {
+                if (quantity <= 0) {
+                    this.removeFromCart(productId);
+                } else {
+                    item.quantity = quantity;
+                    this.saveCart();
+                    this.updateCartCount();
+                }
+            }
+        }
+    },
         
         async removeFromCart(productId) {
             try {
@@ -268,6 +295,10 @@ document.addEventListener('alpine:init', () => {
                     const data = await response.json();
                     this.items = data.cart_items;
                     this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
+                    
                     this.showNotification('Item removed from cart');
                 } else {
                     throw new Error('Failed to remove item');
@@ -314,6 +345,9 @@ document.addEventListener('alpine:init', () => {
                 if (response.ok) {
                     this.items = [];
                     this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
                 } else {
                     throw new Error('Failed to clear cart');
                 }
@@ -324,6 +358,16 @@ document.addEventListener('alpine:init', () => {
                 this.saveCart();
                 this.updateCartCount();
             }
+        },
+        
+        showStockError(message) {
+            Swal.fire({
+                title: 'Item Out of Stock',
+                text: message,
+                icon: 'warning',
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#ef4444'
+            });
         },
         
         showNotification(message) {

@@ -5,8 +5,11 @@ namespace App\Services;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Product;
+use App\Models\StockReservation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CartService
 {
@@ -30,15 +33,44 @@ class CartService
      * @param int $productId
      * @param int $quantity
      * @return array
+     * @throws \Exception
      */
     public function addToCart($productId, $quantity = 1)
     {
-        $product = Product::findOrFail($productId);
-        
-        if (Auth::check()) {
-            return $this->addToUserCart(Auth::id(), $product, $quantity);
-        } else {
-            return $this->addToGuestCart($product, $quantity);
+        try {
+            DB::beginTransaction();
+            
+            // Get product with lock to prevent race conditions
+            $product = Product::lockForUpdate()->findOrFail($productId);
+            
+            // Check if product is in stock
+            if (!$product->in_stock || $product->stock <= 0) {
+                throw new \Exception('Product is out of stock');
+            }
+            
+            // Check if requested quantity exceeds available stock
+            if ($quantity > $product->stock) {
+                throw new \Exception("Only {$product->stock} items available in stock");
+            }
+            
+            if (Auth::check()) {
+                $result = $this->addToUserCart(Auth::id(), $product, $quantity);
+            } else {
+                $result = $this->addToGuestCart($product, $quantity);
+            }
+            
+            DB::commit();
+            return $result;
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Add to cart failed', [
+                'product_id' => $productId,
+                'quantity' => $quantity,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
     }
 
@@ -48,13 +80,45 @@ class CartService
      * @param int $productId
      * @param int $quantity
      * @return array
+     * @throws \Exception
      */
     public function updateCartItem($productId, $quantity)
     {
-        if (Auth::check()) {
-            return $this->updateUserCartItem(Auth::id(), $productId, $quantity);
-        } else {
-            return $this->updateGuestCartItem($productId, $quantity);
+        try {
+            DB::beginTransaction();
+            
+            // Get product with lock to prevent race conditions
+            $product = Product::lockForUpdate()->findOrFail($productId);
+            
+            // Check if product is still in stock (for non-zero quantities)
+            if ($quantity > 0) {
+                if (!$product->in_stock || $product->stock <= 0) {
+                    throw new \Exception('Product is out of stock');
+                }
+                
+                if ($quantity > $product->stock) {
+                    throw new \Exception("Only {$product->stock} items available in stock");
+                }
+            }
+            
+            if (Auth::check()) {
+                $result = $this->updateUserCartItem(Auth::id(), $productId, $quantity);
+            } else {
+                $result = $this->updateGuestCartItem($productId, $quantity);
+            }
+            
+            DB::commit();
+            return $result;
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Update cart item failed', [
+                'product_id' => $productId,
+                'quantity' => $quantity,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
     }
 
@@ -142,6 +206,7 @@ class CartService
                 return [
                     'id' => $item->product->id,
                     'name' => $item->product->name,
+                    'description' => $item->product->description,
                     'price' => $item->price,
                     'image' => $item->product->image,
                     'quantity' => $item->quantity,
@@ -213,6 +278,7 @@ class CartService
             $cart[] = [
                 'id' => $product->id,
                 'name' => $product->name,
+                'description' => $product->description,
                 'price' => $product->price,
                 'image' => $product->image,
                 'quantity' => $quantity
@@ -360,5 +426,73 @@ class CartService
     {
         $items = $this->getCartItems();
         return collect($items)->sum('quantity');
+    }
+    
+    /**
+     * Validate cart items for checkout (check stock availability with reservations).
+     * 
+     * @return array
+     */
+    public function validateCartForCheckout()
+    {
+        $cartItems = $this->getCartItems();
+        $outOfStockItems = [];
+        $insufficientStockItems = [];
+        
+        foreach ($cartItems as $item) {
+            $product = Product::find($item['id']);
+            
+            if (!$product) {
+                $outOfStockItems[] = [
+                    'id' => $item['id'],
+                    'name' => $item['name'],
+                    'reason' => 'Product not found'
+                ];
+                continue;
+            }
+            
+            // Calculate available stock (total - reserved)
+            $reservedQuantity = StockReservation::where('product_id', $item['id'])
+                ->where('status', 'active')
+                ->where('reserved_until', '>', now())
+                ->sum('quantity');
+            
+            $availableStock = $product->stock - $reservedQuantity;
+            
+            if (!$product->in_stock || $availableStock <= 0) {
+                $outOfStockItems[] = [
+                    'id' => $item['id'],
+                    'name' => $item['name'],
+                    'reason' => 'Out of stock',
+                    'available' => $availableStock
+                ];
+            } elseif ($item['quantity'] > $availableStock) {
+                $insufficientStockItems[] = [
+                    'id' => $item['id'],
+                    'name' => $item['name'],
+                    'requested' => $item['quantity'],
+                    'available' => $availableStock
+                ];
+            }
+        }
+        
+        return [
+            'valid' => empty($outOfStockItems) && empty($insufficientStockItems),
+            'out_of_stock' => $outOfStockItems,
+            'insufficient_stock' => $insufficientStockItems
+        ];
+    }
+    
+    /**
+     * Remove out of stock items from cart.
+     * 
+     * @param array $outOfStockItems
+     * @return void
+     */
+    public function removeOutOfStockItems($outOfStockItems)
+    {
+        foreach ($outOfStockItems as $item) {
+            $this->removeFromCart($item['id']);
+        }
     }
 }

@@ -41,17 +41,25 @@ class CartController extends Controller
             'quantity' => 'integer|min:1|max:10'
         ]);
 
-        $cartItems = $this->cartService->addToCart(
-            $request->product_id,
-            $request->quantity ?? 1
-        );
+        try {
+            $cartItems = $this->cartService->addToCart(
+                $request->product_id,
+                $request->quantity ?? 1
+            );
 
-        return response()->json([
-            'success' => true,
-            'cart_items' => $cartItems,
-            'cart_total' => $this->cartService->getCartTotal(),
-            'cart_item_count' => $this->cartService->getCartItemCount()
-        ]);
+            return response()->json([
+                'success' => true,
+                'cart_items' => $cartItems,
+                'cart_total' => $this->cartService->getCartTotal(),
+                'cart_item_count' => $this->cartService->getCartItemCount()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'error_type' => 'stock_validation'
+            ], 400);
+        }
     }
 
     /**
@@ -67,17 +75,25 @@ class CartController extends Controller
             'quantity' => 'required|integer|min:0|max:10'
         ]);
 
-        $cartItems = $this->cartService->updateCartItem(
-            $request->product_id,
-            $request->quantity
-        );
+        try {
+            $cartItems = $this->cartService->updateCartItem(
+                $request->product_id,
+                $request->quantity
+            );
 
-        return response()->json([
-            'success' => true,
-            'cart_items' => $cartItems,
-            'cart_total' => $this->cartService->getCartTotal(),
-            'cart_item_count' => $this->cartService->getCartItemCount()
-        ]);
+            return response()->json([
+                'success' => true,
+                'cart_items' => $cartItems,
+                'cart_total' => $this->cartService->getCartTotal(),
+                'cart_item_count' => $this->cartService->getCartItemCount()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'error_type' => 'stock_issue'
+            ], 400);
+        }
     }
 
     /**
@@ -127,6 +143,40 @@ class CartController extends Controller
     public function getCartData()
     {
         return response()->json([
+            'cart_items' => $this->cartService->getCartItems(),
+            'cart_total' => $this->cartService->getCartTotal(),
+            'cart_item_count' => $this->cartService->getCartItemCount()
+        ]);
+    }
+    
+    /**
+     * Validate cart stock and return out of stock items.
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function validateStock()
+    {
+        $outOfStockItems = $this->cartService->validateCartStock();
+        
+        return response()->json([
+            'out_of_stock_items' => $outOfStockItems,
+            'has_out_of_stock' => !empty($outOfStockItems)
+        ]);
+    }
+    
+    /**
+     * Remove out of stock items from cart.
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function removeOutOfStock()
+    {
+        $outOfStockItems = $this->cartService->validateCartStock();
+        $removedItems = $this->cartService->removeOutOfStockItems($outOfStockItems);
+        
+        return response()->json([
+            'success' => true,
+            'removed_items' => $removedItems,
             'cart_items' => $this->cartService->getCartItems(),
             'cart_total' => $this->cartService->getCartTotal(),
             'cart_item_count' => $this->cartService->getCartItemCount()

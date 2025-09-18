@@ -44,6 +44,8 @@ Route::post('/cart/update', [App\Http\Controllers\CartController::class, 'update
 Route::post('/cart/remove', [App\Http\Controllers\CartController::class, 'remove'])->name('cart.remove');
 Route::post('/cart/clear', [App\Http\Controllers\CartController::class, 'clear'])->name('cart.clear');
 Route::get('/cart/data', [App\Http\Controllers\CartController::class, 'getCartData'])->name('cart.data');
+Route::get('/cart/validate-stock', [App\Http\Controllers\CartController::class, 'validateStock'])->name('cart.validate-stock');
+Route::post('/cart/remove-out-of-stock', [App\Http\Controllers\CartController::class, 'removeOutOfStock'])->name('cart.remove-out-of-stock');
 
 // Checkout routes
 Route::get('/checkout', [App\Http\Controllers\CheckoutController::class, 'index'])->name('checkout.index');
@@ -51,6 +53,8 @@ Route::get('/checkout', [App\Http\Controllers\CheckoutController::class, 'index'
 // AI routes
 Route::post('/ai/recommendations', [GeminiController::class, 'recommendations'])->name('ai.recommendations');
 Route::post('/ai/track-interaction', [GeminiController::class, 'trackInteraction'])->name('ai.track-interaction');
+
+// Gemini Export Management (Admin only)
 
 // stripe integration routes test api
 Route::get('/stripe', [StripeController::class, 'index'])->name('stripe.index');

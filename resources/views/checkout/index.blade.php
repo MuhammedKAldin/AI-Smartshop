@@ -204,6 +204,7 @@ document.addEventListener('alpine:init', () => {
         items: [],
         cartCount: 0,
         processing: false,
+        orderToken: null,
         stripe: null,
         elements: null,
         cardElement: null,
@@ -218,16 +219,98 @@ document.addEventListener('alpine:init', () => {
             zipCode: ''
         },
         
-        init() {
-            this.loadCart();
+        async init() {
+            await this.loadCart();
             this.initializeStripe();
+            
+            // Generate order token for idempotency
+            this.orderToken = this.generateOrderToken();
+            
+            // Validate stock before proceeding
+            await this.validateCartStock();
         },
         
-        loadCart() {
-            const cart = localStorage.getItem('cart');
-            if (cart) {
-                this.items = JSON.parse(cart);
+        async loadCart() {
+            try {
+                const response = await fetch('/cart/data');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.items = data.cart_items;
+                } else {
+                    // Fallback to localStorage for guests
+                    const cart = localStorage.getItem('cart');
+                    if (cart) {
+                        this.items = JSON.parse(cart);
+                    }
+                }
                 this.updateCartCount();
+            } catch (error) {
+                console.error('Error loading cart:', error);
+                // Fallback to localStorage
+                const cart = localStorage.getItem('cart');
+                if (cart) {
+                    this.items = JSON.parse(cart);
+                }
+                this.updateCartCount();
+            }
+        },
+        
+        async validateCartStock() {
+            try {
+                const response = await fetch('/cart/validate-stock');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.has_out_of_stock) {
+                        // Show SweetAlert for out of stock items
+                        const itemNames = data.out_of_stock_items.map(item => item.name).join(', ');
+                        
+                        const result = await Swal.fire({
+                            icon: 'warning',
+                            title: 'Items Out of Stock',
+                            html: `The following items are no longer available:<br><strong>${itemNames}</strong><br><br>These items will be removed from your cart.`,
+                            confirmButtonText: 'Continue to Cart',
+                            confirmButtonColor: '#f59e0b',
+                            showCancelButton: true,
+                            cancelButtonText: 'Stay on Checkout',
+                            cancelButtonColor: '#6b7280'
+                        });
+                        
+                        if (result.isConfirmed) {
+                            // Remove out of stock items and redirect to cart
+                            await this.removeOutOfStockItems();
+                            window.location.href = '/cart';
+                        } else {
+                            // Remove out of stock items but stay on checkout
+                            await this.removeOutOfStockItems();
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error validating cart stock:', error);
+            }
+        },
+        
+        async removeOutOfStockItems() {
+            try {
+                const response = await fetch('/cart/remove-out-of-stock', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.items = data.cart_items;
+                    this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
+                }
+            } catch (error) {
+                console.error('Error removing out of stock items:', error);
             }
         },
         
@@ -263,10 +346,26 @@ document.addEventListener('alpine:init', () => {
             });
         },
         
+        generateOrderToken() {
+            const data = {
+                cart_items: this.items,
+                total_amount: this.getGrandTotal(),
+                timestamp: new Date().toISOString().slice(0, 16) // Round to minute
+            };
+            return 'order_' + btoa(JSON.stringify(data)).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+        },
+        
         async processPayment() {
             if (this.processing) return;
             
             this.processing = true;
+            
+            // Disable the submit button to prevent double-clicking
+            const submitButton = document.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Processing...';
+            }
             
             try {
                 // Create payment method
@@ -290,6 +389,13 @@ document.addEventListener('alpine:init', () => {
                     throw error;
                 }
                 
+                // Debug: Log the request data
+                console.log('Sending checkout request:', {
+                    shipping_info: this.shippingInfo,
+                    cart_items: this.items,
+                    total_amount: this.getGrandTotal()
+                });
+                
                 // Create checkout session
                 const response = await fetch('/stripe/checkout', {
                     method: 'POST',
@@ -301,11 +407,46 @@ document.addEventListener('alpine:init', () => {
                         payment_method_id: paymentMethod.id,
                         shipping_info: this.shippingInfo,
                         cart_items: this.items,
-                        total_amount: this.getGrandTotal()
+                        total_amount: this.getGrandTotal(),
+                        order_token: this.orderToken
                     })
                 });
                 
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    console.error('Non-JSON response:', text);
+                    throw new Error('Server returned invalid response. Please try again.');
+                }
+                
                 const session = await response.json();
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    
+                    // Handle stock validation error
+                    if (errorData.error_type === 'stock_issue') {
+                        const itemNames = errorData.out_of_stock_items.map(item => item.name).join(', ');
+                        
+                        await Swal.fire({
+                            icon: 'warning',
+                            title: 'Items Out of Stock',
+                            html: `The following items are no longer available:<br><strong>${itemNames}</strong><br><br>You will be redirected to your cart to update your order.`,
+                            confirmButtonText: 'Go to Cart',
+                            confirmButtonColor: '#f59e0b'
+                        });
+                        
+                        // Redirect to cart page
+                        window.location.href = '/cart';
+                        return;
+                    }
+                    
+                    throw new Error(errorData.error || 'Payment processing failed');
+                }
                 
                 if (session.error) {
                     throw new Error(session.error);
@@ -326,9 +467,26 @@ document.addEventListener('alpine:init', () => {
                 
             } catch (error) {
                 console.error('Payment error:', error);
-                this.showNotification('Payment failed: ' + error.message, 'error');
+                
+                // Show error with SweetAlert2
+                await Swal.fire({
+                    icon: 'error',
+                    title: 'Payment Failed',
+                    text: error.message || 'An error occurred during payment processing. Please try again.',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#ef4444'
+                });
+                
+                // Stay on checkout page for user to retry
             } finally {
                 this.processing = false;
+                
+                // Re-enable the submit button
+                const submitButton = document.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Place Order';
+                }
             }
         },
         
@@ -343,10 +501,32 @@ document.addEventListener('alpine:init', () => {
             return subtotal + shipping + tax;
         },
         
-        clearCart() {
-            localStorage.removeItem('cart');
-            this.items = [];
-            this.updateCartCount();
+        async clearCart() {
+            try {
+                const response = await fetch('/cart/clear', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    }
+                });
+
+                if (response.ok) {
+                    this.items = [];
+                    this.updateCartCount();
+                    
+                    // Dispatch cart updated event for layout
+                    window.dispatchEvent(new CustomEvent('cartUpdated'));
+                } else {
+                    throw new Error('Failed to clear cart');
+                }
+            } catch (error) {
+                console.error('Error clearing cart:', error);
+                // Fallback to local clear
+                localStorage.removeItem('cart');
+                this.items = [];
+                this.updateCartCount();
+            }
         },
         
         updateCartCount() {
