@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\Product;
 
 class GeminiController extends Controller
 {
@@ -56,6 +57,379 @@ class GeminiController extends Controller
                 'error' => 'Failed to get response AI',
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Get AI-powered product recommendations using Google Gemini.
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function recommendations(Request $request)
+    {
+        try {
+            $userId = $request->input('user_id');
+            $productId = $request->input('product_id');
+            $cartItems = $request->input('cart_items', []);
+            $context = $request->input('context', 'homepage'); // homepage, product_view, cart
+            
+            // Check if user is logged in
+            $isLoggedIn = !empty($userId);
+            
+            // Get products from database with optimized query
+            $allProducts = Product::select(['id', 'name', 'description', 'price', 'image', 'category', 'tags', 'rating'])
+                ->inStock()
+                ->get()
+                ->toArray();
+            
+            // If user is not logged in, use fallback mechanism
+            if (!$isLoggedIn) {
+                return $this->getFallbackRecommendations($allProducts, $productId, $cartItems, $context);
+            }
+            
+            // Build comprehensive AI context for logged-in users
+            $aiContext = $this->buildAIRecommendationContext($userId, $productId, $cartItems, $context, $allProducts);
+            
+            // Get AI recommendations
+            $apiKey = config('ai.gemini.api_key');
+            if (!$apiKey) {
+                // Fallback to algorithm-based recommendations
+                return $this->getFallbackRecommendations($allProducts, $productId, $cartItems, $context);
+            }
+            
+            $endpoint = config('ai.model.endpoint_for_model')(null);
+            $payload = [
+                'contents' => [
+                    [
+                        'role' => 'user',
+                        'parts' => [['text' => $aiContext]],
+                    ],
+                ],
+            ];
+            
+            $response = Http::asJson()->post($endpoint.'?key='.$apiKey, $payload);
+            $responseData = $response->json();
+            
+            // Extract AI response
+            $aiResponse = config('ai.model.extract_response_content')($responseData);
+            
+            // Parse AI response to get product IDs
+            $recommendedIds = [];
+            if (is_string($aiResponse)) {
+                // Try to extract JSON array from response
+                if (preg_match('/\[(\d+(?:,\s*\d+)*)\]/', $aiResponse, $matches)) {
+                    $recommendedIds = array_map('intval', explode(',', $matches[1]));
+                }
+            }
+            
+            // If AI didn't return valid IDs, use fallback
+            if (empty($recommendedIds)) {
+                return $this->getFallbackRecommendations($allProducts, $productId, $cartItems, $context);
+            }
+            
+            // Get recommended products
+            $recommendations = collect($allProducts)->whereIn('id', $recommendedIds)->take(4)->values()->toArray();
+            
+            // Track recommendation generation for analytics
+            $this->trackRecommendationGeneration($userId, $recommendations, $context, 'ai');
+            
+            return response()->json([
+                'recommendations' => $recommendations,
+                'source' => 'ai',
+                'personalized' => true
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('AI Recommendations Error: ' . $e->getMessage());
+            
+            // Fallback to simple recommendations
+            return $this->getFallbackRecommendations([], $request->input('product_id'), $request->input('cart_items', []), $request->input('context', 'homepage'));
+        }
+    }
+    
+    /**
+     * Build comprehensive AI recommendation context for logged-in users.
+     * 
+     * @param int $userId
+     * @param int|null $productId
+     * @param array $cartItems
+     * @param string $context
+     * @param array $allProducts
+     * @return string
+     */
+    private function buildAIRecommendationContext($userId, $productId, $cartItems, $context, $allProducts)
+    {
+        // Get user profile with order history and browsing data
+        $userProfile = $this->getUserProfile($userId);
+        
+        $aiContext = "Based on the following comprehensive user information, recommend 4 personalized products:\n\n";
+        
+        // User Profile Context
+        $aiContext .= "USER PROFILE:\n";
+        $aiContext .= "User ID: {$userId}\n";
+        $aiContext .= "Preferred Categories: " . implode(', ', $userProfile['preferred_categories']) . "\n";
+        $aiContext .= "Average Purchase Price: $" . number_format($userProfile['avg_purchase_price'], 2) . "\n";
+        $aiContext .= "Total Orders: {$userProfile['total_orders']}\n";
+        $aiContext .= "Recent Browsing: " . implode(', ', $userProfile['recent_views']) . "\n\n";
+        
+        // Current Context
+        if ($productId) {
+            $currentProduct = collect($allProducts)->firstWhere('id', $productId);
+            if ($currentProduct) {
+                $aiContext .= "CURRENT PRODUCT:\n";
+                $aiContext .= "Name: {$currentProduct['name']}\n";
+                $aiContext .= "Description: {$currentProduct['description']}\n";
+                $aiContext .= "Category: {$currentProduct['category']}\n";
+                $aiContext .= "Price: $" . number_format($currentProduct['price'], 2) . "\n";
+                $aiContext .= "Tags: " . implode(', ', $currentProduct['tags']) . "\n\n";
+            }
+        }
+        
+        // Cart Context
+        if (!empty($cartItems)) {
+            $aiContext .= "CART CONTENTS:\n";
+            foreach ($cartItems as $item) {
+                $aiContext .= "- {$item['name']} (Qty: {$item['quantity']}, Price: $" . number_format($item['price'], 2) . ")\n";
+            }
+            $aiContext .= "\n";
+        }
+        
+        // Purchase History Context
+        if (!empty($userProfile['purchase_history'])) {
+            $aiContext .= "PURCHASE HISTORY:\n";
+            foreach ($userProfile['purchase_history'] as $purchase) {
+                $aiContext .= "- {$purchase['name']} (Category: {$purchase['category']}, Price: $" . number_format($purchase['price'], 2) . ")\n";
+            }
+            $aiContext .= "\n";
+        }
+        
+        // Similar User Patterns
+        if (!empty($userProfile['similar_user_patterns'])) {
+            $aiContext .= "SIMILAR USER PATTERNS:\n";
+            $aiContext .= "Users with similar preferences also bought: " . implode(', ', $userProfile['similar_user_patterns']) . "\n\n";
+        }
+        
+        // Available Products
+        $aiContext .= "AVAILABLE PRODUCTS:\n";
+        foreach ($allProducts as $product) {
+            $aiContext .= "- {$product['name']} (ID: {$product['id']}) - {$product['description']} - Category: {$product['category']} - Price: $" . number_format($product['price'], 2) . " - Tags: " . implode(', ', $product['tags']) . "\n";
+        }
+        
+        $aiContext .= "\nRecommendation Context: {$context}\n";
+        $aiContext .= "Please recommend 4 products that would be most relevant to this user based on their profile, preferences, and current context. Return only the product IDs in a JSON array format like [1, 2, 3, 4].";
+        
+        return $aiContext;
+    }
+    
+    /**
+     * Get comprehensive user profile including order history and browsing data.
+     * 
+     * @param int $userId
+     * @return array
+     */
+    private function getUserProfile($userId)
+    {
+        // Get user interactions (browsing data)
+        $interactions = \App\Models\UserInteraction::where('user_id', $userId)
+            ->with('product')
+            ->orderBy('created_at', 'desc')
+            ->get();
+        
+        // Get order history
+        $orders = \App\Models\Order::where('user_id', $userId)
+            ->with(['orderItems.product'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+        
+        // Analyze preferred categories
+        $categoryCounts = [];
+        $totalSpent = 0;
+        $totalOrders = $orders->count();
+        
+        foreach ($orders as $order) {
+            foreach ($order->orderItems as $item) {
+                $category = $item->product->category;
+                $categoryCounts[$category] = ($categoryCounts[$category] ?? 0) + 1;
+                $totalSpent += $item->price * $item->quantity;
+            }
+        }
+        
+        // Get recent views
+        $recentViews = $interactions->where('interaction_type', 'view')
+            ->take(10)
+            ->pluck('product.name')
+            ->toArray();
+        
+        // Get purchase history
+        $purchaseHistory = [];
+        foreach ($orders->take(5) as $order) {
+            foreach ($order->orderItems as $item) {
+                $purchaseHistory[] = [
+                    'name' => $item->product->name,
+                    'category' => $item->product->category,
+                    'price' => $item->price
+                ];
+            }
+        }
+        
+        // Get similar user patterns (users who bought similar products)
+        $similarUserPatterns = $this->getSimilarUserPatterns($userId);
+        
+        return [
+            'preferred_categories' => array_keys($categoryCounts),
+            'avg_purchase_price' => $totalOrders > 0 ? $totalSpent / $totalOrders : 0,
+            'total_orders' => $totalOrders,
+            'recent_views' => $recentViews,
+            'purchase_history' => $purchaseHistory,
+            'similar_user_patterns' => $similarUserPatterns
+        ];
+    }
+    
+    /**
+     * Get similar user patterns based on purchase history.
+     * 
+     * @param int $userId
+     * @return array
+     */
+    private function getSimilarUserPatterns($userId)
+    {
+        // Get current user's purchased product categories
+        $userCategories = \App\Models\Order::where('user_id', $userId)
+            ->with(['orderItems.product'])
+            ->get()
+            ->flatMap(function($order) {
+                return $order->orderItems->pluck('product.category');
+            })
+            ->unique()
+            ->toArray();
+        
+        if (empty($userCategories)) {
+            return [];
+        }
+        
+        // Find users who bought products in similar categories
+        $similarUsers = \App\Models\Order::where('user_id', '!=', $userId)
+            ->with(['orderItems.product'])
+            ->get()
+            ->filter(function($order) use ($userCategories) {
+                $orderCategories = $order->orderItems->pluck('product.category')->unique()->toArray();
+                return !empty(array_intersect($userCategories, $orderCategories));
+            })
+            ->flatMap(function($order) {
+                return $order->orderItems->pluck('product.name');
+            })
+            ->unique()
+            ->take(5)
+            ->toArray();
+        
+        return $similarUsers;
+    }
+    
+    /**
+     * Track recommendation generation for analytics.
+     * 
+     * @param int $userId
+     * @param array $recommendations
+     * @param string $context
+     * @param string $source
+     * @return void
+     */
+    private function trackRecommendationGeneration($userId, $recommendations, $context, $source)
+    {
+        try {
+            \App\Models\AiRecommendation::create([
+                'user_id' => $userId,
+                'recommendations_json' => $recommendations,
+                'context' => $context,
+                'created_at' => now()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to track recommendation generation: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Get fallback recommendations when AI is unavailable.
+     * Uses simple algorithms based on category, price, and popularity.
+     * 
+     * @param array $allProducts
+     * @param int|null $productId
+     * @param array $cartItems
+     * @param string $context
+     * @return array
+     */
+    private function getFallbackRecommendations($allProducts, $productId = null, $cartItems = [], $context = 'homepage')
+    {
+        // Simple fallback algorithm
+        $recommendations = [];
+        
+        if (empty($allProducts)) {
+            // Get random products from database as fallback
+            $recommendations = Product::inRandomOrder()->take(4)->get()->toArray();
+        } else {
+            // Simple algorithm: recommend products from same category or random
+            $currentProduct = collect($allProducts)->firstWhere('id', $productId);
+            $category = $currentProduct['category'] ?? null;
+            
+            if ($category) {
+                $recommendations = collect($allProducts)
+                    ->where('category', $category)
+                    ->where('id', '!=', $productId)
+                    ->take(2)
+                    ->values()
+                    ->toArray();
+            }
+            
+            // Fill remaining slots with random products
+            $remaining = 4 - count($recommendations);
+            if ($remaining > 0) {
+                $randomProducts = collect($allProducts)
+                    ->where('id', '!=', $productId)
+                    ->random($remaining)
+                    ->values()
+                    ->toArray();
+                $recommendations = array_merge($recommendations, $randomProducts);
+            }
+        }
+        
+        return response()->json([
+            'recommendations' => $recommendations,
+            'source' => 'fallback',
+            'personalized' => false
+        ]);
+    }
+    
+    /**
+     * Track user interaction for analytics and personalization.
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function trackInteraction(Request $request)
+    {
+        try {
+            $userId = $request->input('user_id');
+            $productId = $request->input('product_id');
+            $interactionType = $request->input('interaction_type'); // view, add_to_cart, purchase
+            
+            if (!$userId || !$productId || !$interactionType) {
+                return response()->json(['error' => 'Missing required parameters'], 400);
+            }
+            
+            // Track the interaction
+            \App\Models\UserInteraction::create([
+                'user_id' => $userId,
+                'product_id' => $productId,
+                'interaction_type' => $interactionType,
+                'created_at' => now()
+            ]);
+            
+            return response()->json(['success' => true]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to track user interaction: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to track interaction'], 500);
         }
     }
 }
