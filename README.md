@@ -109,15 +109,15 @@ php artisan serve
 
 The application comes with pre-configured test accounts:
 
-### Admin Account
+### Admin Account (Full admin panel access)
+
 - **Email**: admin@smartshop.com
 - **Password**: password
-- **Access**: Full admin panel access
 
-### Customer Accounts
+### Customer Accounts (Shopping and account management)
+
 - **Email**: customer@smartshop.com
 - **Password**: password
-- **Access**: Shopping and account management
 
 - **Email**: jane@smartshop.com
 - **Password**: password
