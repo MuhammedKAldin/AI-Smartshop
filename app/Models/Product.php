@@ -71,4 +71,13 @@ class Product extends Model
     {
         $this->attributes['in_stock'] = $value && $this->stock > 0;
     }
+
+    public function getImageAttribute($value)
+    {
+        if ($value && ! str_starts_with($value, 'http')) {
+            return '/storage/'.$value;
+        }
+
+        return $value;
+    }
 }

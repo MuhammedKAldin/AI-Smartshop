@@ -17,17 +17,33 @@ class UserSeeder extends Seeder
     {
         // Create Admin User
         User::create([
-            'name' => 'admin',
-            'email' => 'admin@gmail.com',
+            'name' => 'Admin User',
+            'email' => 'admin@smartshop.com',
             'password' => Hash::make('password'),
             'is_admin' => true,
             'email_verified_at' => now(),
         ]);
 
-        // Create Customer User
+        // Create Customer Users
         User::create([
-            'name' => 'mohamed kamal',
-            'email' => 'moha@gmail.com',
+            'name' => 'Customer User',
+            'email' => 'customer@smartshop.com',
+            'password' => Hash::make('password'),
+            'is_admin' => false,
+            'email_verified_at' => now(),
+        ]);
+
+        User::create([
+            'name' => 'Jane Smith',
+            'email' => 'jane@smartshop.com',
+            'password' => Hash::make('password'),
+            'is_admin' => false,
+            'email_verified_at' => now(),
+        ]);
+
+        User::create([
+            'name' => 'Mike Johnson',
+            'email' => 'mike@smartshop.com',
             'password' => Hash::make('password'),
             'is_admin' => false,
             'email_verified_at' => now(),
