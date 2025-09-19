@@ -86,8 +86,15 @@ class StripeController extends Controller
                 ], 400);
             }
             
+            // Prepare order data for token generation
+            $orderData = [
+                'user_id' => auth()->id(),
+                'items' => $cartItems,
+                'total' => $totalAmount
+            ];
+            
             // Reserve stock for the order
-            $orderToken = $request->input('order_token', $this->generateOrderToken($request));
+            $orderToken = $request->input('order_token', $this->orderService->generateOrderToken($orderData));
             $reservations = $this->stockReservationService->reserveCartStock(
                 $cartItems,
                 $orderToken,
@@ -171,10 +178,17 @@ class StripeController extends Controller
             'shipping_address_collection' => [
                 'allowed_countries' => ['US', 'CA'],
             ],
+            'payment_intent_data' => [
+                'metadata' => [
+                    'order_token' => $orderToken,
+                    'user_id' => auth()->id(),
+                ]
+            ],
             'metadata' => [
                 'user_id' => auth()->id(),
-                'cart_items' => json_encode($cartItems),
+                'order_token' => $orderToken,
                 'idempotency_key' => $idempotencyKey,
+                'item_count' => count($cartItems),
             ],
         ], [
             'idempotency_key' => $idempotencyKey
@@ -224,7 +238,7 @@ class StripeController extends Controller
                     'shipping' => 9.99, // Fixed shipping
                     'total' => $cartTotal + ($cartTotal * 0.08) + 9.99,
                     'stripe_session_id' => $sessionId,
-                    'status' => 'completed',
+                    'status' => 'processing', // Changed from 'completed' to 'processing' (valid enum value)
                     'shipping_address' => json_encode($stripeSession->shipping_details ?? []),
                     'billing_address' => json_encode($stripeSession->customer_details ?? []),
                     'items' => $cartItems
@@ -242,16 +256,22 @@ class StripeController extends Controller
                 // Clear the cart after successful order creation
                 $this->cartService->clearCart();
                 
-                $request->session()->flash('payment_success', true);
-                $request->session()->flash('session_id', $sessionId);
-                $request->session()->flash('order_number', $order->order_number);
+                // Redirect to cart page with success message
+                return redirect()->route('cart.index')->with([
+                    'payment_success' => true,
+                    'order_number' => $order->order_number,
+                    'session_id' => $sessionId,
+                    'success_message' => 'Payment successful! Your order #' . $order->order_number . ' has been confirmed.'
+                ]);
                 
             } catch (\Exception $e) {
                 Log::error('Order creation error: ' . $e->getMessage());
                 $request->session()->flash('payment_error', 'Order creation failed: ' . $e->getMessage());
+                return redirect()->route('cart.index');
             }
         }
 
+        // If no session ID, redirect to cart
         return redirect()->route('cart.index');
     }
     
@@ -272,5 +292,312 @@ class StripeController extends Controller
         ];
         
         return 'stripe_checkout_' . hash('sha256', json_encode($data));
+    }
+    
+    /**
+     * Handle Stripe webhook events.
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function webhook(Request $request)
+    {
+        $payload = $request->getContent();
+        $sigHeader = $request->header('Stripe-Signature');
+        $endpointSecret = config('stripe.webhook_secret');
+        
+        // Log webhook attempt for debugging
+        Log::info('Stripe webhook received', [
+            'payload_size' => strlen($payload),
+            'has_signature' => !empty($sigHeader),
+            'has_secret' => !empty($endpointSecret),
+            'headers' => $request->headers->all()
+        ]);
+        
+        // Check if webhook secret is configured
+        if (empty($endpointSecret) || $endpointSecret === 'whsec_your_actual_stripe_webhook_secret_here') {
+            Log::warning('Stripe webhook secret not properly configured', [
+                'current_secret' => $endpointSecret
+            ]);
+            return response('Webhook secret not configured', 500);
+        }
+        
+        try {
+            $event = \Stripe\Webhook::constructEvent(
+                $payload, $sigHeader, $endpointSecret
+            );
+        } catch (\UnexpectedValueException $e) {
+            Log::error('Invalid payload in Stripe webhook: ' . $e->getMessage());
+            return response('Invalid payload', 400);
+        } catch (\Stripe\Exception\SignatureVerificationException $e) {
+            Log::error('Invalid signature in Stripe webhook: ' . $e->getMessage());
+            return response('Invalid signature', 400);
+        }
+        
+        // Handle the event
+        switch ($event->type) {
+            case 'checkout.session.completed':
+                $this->handleCheckoutSessionCompleted($event->data->object);
+                break;
+            case 'payment_intent.succeeded':
+                $this->handlePaymentIntentSucceeded($event->data->object);
+                break;
+            case 'payment_intent.payment_failed':
+                $this->handlePaymentIntentFailed($event->data->object);
+                break;
+            default:
+                Log::info('Unhandled Stripe webhook event type: ' . $event->type);
+        }
+        
+        return response('Webhook handled', 200);
+    }
+    
+    /**
+     * Handle checkout session completed event.
+     * 
+     * @param object $session
+     * @return void
+     */
+    private function handleCheckoutSessionCompleted($session)
+    {
+        Log::info('Checkout session completed', [
+            'session_id' => $session->id,
+            'payment_status' => $session->payment_status,
+            'customer_email' => $session->customer_details->email ?? null,
+            'metadata' => $session->metadata ?? []
+        ]);
+        
+        try {
+            DB::beginTransaction();
+            
+            // Get order token from metadata
+            $orderToken = $session->metadata->order_token ?? null;
+            $userId = $session->metadata->user_id ?? null;
+            
+            if (!$orderToken || !$userId) {
+                Log::error('Missing order token or user ID in checkout session', [
+                    'session_id' => $session->id,
+                    'order_token' => $orderToken,
+                    'user_id' => $userId
+                ]);
+                DB::rollBack();
+                return;
+            }
+            
+            // Check if order already exists (idempotency)
+            $existingOrder = \App\Models\Order::where('order_token', $orderToken)->first();
+            if ($existingOrder) {
+                Log::info('Order already exists for token', [
+                    'order_token' => $orderToken,
+                    'order_id' => $existingOrder->id
+                ]);
+                DB::commit();
+                return;
+            }
+            
+            // Get cart items from the session (we need to reconstruct this)
+            $cartItems = $this->reconstructCartItemsFromSession($session);
+            
+            if (empty($cartItems)) {
+                Log::error('No cart items found in session', [
+                    'session_id' => $session->id
+                ]);
+                DB::rollBack();
+                return;
+            }
+            
+            // Calculate totals
+            $subtotal = $session->amount_subtotal / 100; // Convert from cents
+            $tax = $session->total_details->amount_tax / 100;
+            $shipping = $session->total_details->amount_shipping / 100;
+            $total = $session->amount_total / 100;
+            
+            // Prepare order data
+            $orderData = [
+                'user_id' => $userId,
+                'subtotal' => $subtotal,
+                'tax' => $tax,
+                'shipping' => $shipping,
+                'total' => $total,
+                'stripe_session_id' => $session->id,
+                'status' => 'processing',
+                'shipping_address' => json_encode($session->shipping_details ?? []),
+                'billing_address' => json_encode($session->customer_details ?? []),
+                'items' => $cartItems
+            ];
+            
+            // Create order with idempotency protection
+            $order = $this->orderService->createOrder($orderData, $orderToken);
+            
+            Log::info('Order created successfully via webhook', [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'order_token' => $orderToken,
+                'session_id' => $session->id
+            ]);
+            
+            DB::commit();
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error creating order in webhook: ' . $e->getMessage(), [
+                'session_id' => $session->id,
+                'order_token' => $orderToken ?? null,
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+    
+    /**
+     * Handle payment intent succeeded event.
+     * 
+     * @param object $paymentIntent
+     * @return void
+     */
+    private function handlePaymentIntentSucceeded($paymentIntent)
+    {
+        Log::info('Payment intent succeeded', [
+            'payment_intent_id' => $paymentIntent->id,
+            'amount' => $paymentIntent->amount,
+            'currency' => $paymentIntent->currency,
+            'metadata' => $paymentIntent->metadata ?? []
+        ]);
+        
+        try {
+            DB::beginTransaction();
+            
+            // Get order token from metadata
+            $orderToken = $paymentIntent->metadata->order_token ?? null;
+            
+            if ($orderToken) {
+                // Find the order
+                $order = \App\Models\Order::where('order_token', $orderToken)->first();
+                
+                if ($order) {
+                    // Update order status to completed
+                    $order->update(['status' => 'completed']);
+                    
+                    // Confirm stock reservations (convert to actual stock deduction)
+                    $this->stockReservationService->confirmReservation($orderToken);
+                    
+                    // Clear the cart for the user
+                    $this->cartService->clearCart();
+                    
+                    Log::info('Order completed and stock confirmed via webhook', [
+                        'order_id' => $order->id,
+                        'order_number' => $order->order_number,
+                        'order_token' => $orderToken,
+                        'payment_intent_id' => $paymentIntent->id
+                    ]);
+                } else {
+                    Log::warning('Order not found for token in payment intent webhook', [
+                        'order_token' => $orderToken,
+                        'payment_intent_id' => $paymentIntent->id
+                    ]);
+                }
+            } else {
+                Log::warning('No order token found in payment intent metadata', [
+                    'payment_intent_id' => $paymentIntent->id
+                ]);
+            }
+            
+            DB::commit();
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error processing payment intent success: ' . $e->getMessage(), [
+                'payment_intent_id' => $paymentIntent->id,
+                'order_token' => $orderToken ?? null,
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+    
+    /**
+     * Handle payment intent failed event.
+     * 
+     * @param object $paymentIntent
+     * @return void
+     */
+    private function handlePaymentIntentFailed($paymentIntent)
+    {
+        Log::info('Payment intent failed', [
+            'payment_intent_id' => $paymentIntent->id,
+            'amount' => $paymentIntent->amount,
+            'currency' => $paymentIntent->currency,
+            'last_payment_error' => $paymentIntent->last_payment_error ?? null,
+            'metadata' => $paymentIntent->metadata ?? []
+        ]);
+        
+        try {
+            // Get order token from metadata
+            $orderToken = $paymentIntent->metadata->order_token ?? null;
+            
+            if ($orderToken) {
+                // Cancel stock reservations if payment fails
+                $this->stockReservationService->cancelReservationByToken($orderToken);
+                
+                Log::info('Stock reservations cancelled due to payment failure', [
+                    'order_token' => $orderToken,
+                    'payment_intent_id' => $paymentIntent->id
+                ]);
+            } else {
+                Log::warning('No order token found in failed payment intent metadata', [
+                    'payment_intent_id' => $paymentIntent->id
+                ]);
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Error cancelling stock reservations: ' . $e->getMessage(), [
+                'order_token' => $orderToken ?? null,
+                'payment_intent_id' => $paymentIntent->id,
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+    
+    /**
+     * Reconstruct cart items from Stripe session line items.
+     * 
+     * @param object $session
+     * @return array
+     */
+    private function reconstructCartItemsFromSession($session)
+    {
+        $cartItems = [];
+        
+        try {
+            // Retrieve the session with line items expanded
+            \Stripe\Stripe::setApiKey(config('stripe.sk'));
+            $sessionWithLineItems = \Stripe\Checkout\Session::retrieve($session->id, [
+                'expand' => ['line_items.data.price.product']
+            ]);
+            
+            foreach ($sessionWithLineItems->line_items->data as $lineItem) {
+                // Skip shipping and tax items
+                if (in_array(strtolower($lineItem->description ?? ''), ['shipping', 'tax'])) {
+                    continue;
+                }
+                
+                $product = $lineItem->price->product;
+                $cartItems[] = [
+                    'id' => $product->id ?? uniqid(),
+                    'product_id' => $product->id ?? uniqid(),
+                    'name' => $product->name ?? $lineItem->description ?? 'Unknown Product',
+                    'description' => $product->description ?? '',
+                    'price' => $lineItem->price->unit_amount / 100, // Convert from cents
+                    'quantity' => $lineItem->quantity,
+                    'subtotal' => ($lineItem->price->unit_amount / 100) * $lineItem->quantity,
+                    'image' => $product->images[0] ?? null
+                ];
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Error reconstructing cart items from session: ' . $e->getMessage(), [
+                'session_id' => $session->id
+            ]);
+        }
+        
+        return $cartItems;
     }
 }

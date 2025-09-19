@@ -7,19 +7,54 @@
             document.addEventListener('DOMContentLoaded', function() {
                 Swal.fire({
                     icon: 'success',
-                    title: 'Payment Successful!',
-                    text: 'Your order has been processed successfully. Thank you for your purchase!',
+                    title: '🎉 Payment Successful!',
+                    html: `
+                        <div class="text-center">
+                            <p class="text-lg mb-4">{{ session("success_message", "Your order has been processed successfully. Thank you for your purchase!") }}</p>
+                            <div class="bg-green-50 border border-green-200 rounded-lg p-4 mt-4">
+                                <p class="text-green-800 font-semibold">Order Confirmed</p>
+                                <p class="text-green-600">You will receive an email confirmation shortly.</p>
+                            </div>
+                        </div>
+                    `,
                     showConfirmButton: true,
                     confirmButtonText: 'Continue Shopping',
-                    confirmButtonColor: '#4f46e5',
-                    timer: 5000,
-                    timerProgressBar: true,
-                    toast: true,
-                    position: 'top-end',
-                    showCloseButton: true
+                    confirmButtonColor: '#10b981',
+                    cancelButtonText: 'View Orders',
+                    showCancelButton: true,
+                    cancelButtonColor: '#6b7280',
+                    width: '500px',
+                    padding: '2rem',
+                    backdrop: true,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    showCloseButton: false,
+                    customClass: {
+                        popup: 'swal2-popup-large',
+                        title: 'swal2-title-large',
+                        content: 'swal2-content-large'
+                    }
+                }).then((result) => {
+                    if (result.dismiss === Swal.DismissReason.cancel) {
+                        // Redirect to orders page if it exists, otherwise stay on cart
+                        window.location.href = '/orders';
+                    }
                 });
             });
         </script>
+        
+        <style>
+            .swal2-popup-large {
+                font-size: 1.1rem !important;
+            }
+            .swal2-title-large {
+                font-size: 2rem !important;
+                margin-bottom: 1rem !important;
+            }
+            .swal2-content-large {
+                font-size: 1.1rem !important;
+            }
+        </style>
     @endif
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <!-- Page Header -->

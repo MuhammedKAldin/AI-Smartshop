@@ -423,14 +423,13 @@ document.addEventListener('alpine:init', () => {
                     throw new Error('Server returned invalid response. Please try again.');
                 }
                 
-                const session = await response.json();
+                // Read response body only once
+                const responseData = await response.json();
                 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    
                     // Handle stock validation error
-                    if (errorData.error_type === 'stock_issue') {
-                        const itemNames = errorData.out_of_stock_items.map(item => item.name).join(', ');
+                    if (responseData.error_type === 'stock_issue') {
+                        const itemNames = responseData.out_of_stock_items.map(item => item.name).join(', ');
                         
                         await Swal.fire({
                             icon: 'warning',
@@ -445,16 +444,16 @@ document.addEventListener('alpine:init', () => {
                         return;
                     }
                     
-                    throw new Error(errorData.error || 'Payment processing failed');
+                    throw new Error(responseData.error || 'Payment processing failed');
                 }
                 
-                if (session.error) {
-                    throw new Error(session.error);
+                if (responseData.error) {
+                    throw new Error(responseData.error);
                 }
                 
                 // Redirect to Stripe Checkout
-                if (session.url) {
-                    window.location.href = session.url;
+                if (responseData.url) {
+                    window.location.href = responseData.url;
                 } else {
                     // Handle successful payment
                     this.clearCart();

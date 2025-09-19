@@ -156,11 +156,17 @@ class CartController extends Controller
      */
     public function validateStock()
     {
-        $outOfStockItems = $this->cartService->validateCartStock();
+        // Get cart items first
+        $cartItems = $this->cartService->getCartItems();
+        
+        // Validate stock for cart items
+        $validation = $this->cartService->validateCartStock($cartItems);
         
         return response()->json([
-            'out_of_stock_items' => $outOfStockItems,
-            'has_out_of_stock' => !empty($outOfStockItems)
+            'out_of_stock_items' => $validation['out_of_stock'] ?? [],
+            'insufficient_stock_items' => $validation['insufficient_stock'] ?? [],
+            'has_out_of_stock' => !empty($validation['out_of_stock']) || !empty($validation['insufficient_stock']),
+            'valid' => $validation['valid'] ?? false
         ]);
     }
     

@@ -495,4 +495,15 @@ class CartService
             $this->removeFromCart($item['id']);
         }
     }
+    
+    /**
+     * Validate cart stock (alias for validateCartForCheckout).
+     * 
+     * @param array $cartItems
+     * @return array
+     */
+    public function validateCartStock($cartItems)
+    {
+        return $this->validateCartForCheckout($cartItems);
+    }
 }

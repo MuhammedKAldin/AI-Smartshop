@@ -73,7 +73,9 @@ class OrderService
      */
     private function createOrderItem(Order $order, array $itemData): OrderItem
     {
-        $product = Product::lockForUpdate()->findOrFail($itemData['product_id']);
+        // Handle both 'id' and 'product_id' keys for compatibility
+        $productId = $itemData['product_id'] ?? $itemData['id'];
+        $product = Product::lockForUpdate()->findOrFail($productId);
         
         // Check stock availability
         if (!$product->in_stock || $product->stock < $itemData['quantity']) {
@@ -83,7 +85,7 @@ class OrderService
         // Create order item
         $orderItem = OrderItem::create([
             'order_id' => $order->id,
-            'product_id' => $itemData['product_id'],
+            'product_id' => $productId,
             'quantity' => $itemData['quantity'],
             'price' => $itemData['price'],
         ]);

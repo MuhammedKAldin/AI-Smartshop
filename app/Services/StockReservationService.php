@@ -154,8 +154,15 @@ class StockReservationService
     public function cancelReservations(array $reservations): void
     {
         foreach ($reservations as $reservation) {
-            if ($reservation && $reservation->status === 'active') {
+            // Handle both objects and arrays
+            if ($reservation instanceof StockReservation && $reservation->status === 'active') {
                 $reservation->markAsCancelled();
+            } elseif (is_array($reservation) && isset($reservation['status']) && $reservation['status'] === 'active') {
+                // If it's an array, find the model and update it
+                $reservationModel = StockReservation::find($reservation['id']);
+                if ($reservationModel) {
+                    $reservationModel->markAsCancelled();
+                }
             }
         }
     }
@@ -172,7 +179,7 @@ class StockReservationService
             ->where('status', 'active')
             ->get();
         
-        $this->cancelReservations($reservations->toArray());
+        $this->cancelReservations($reservations->all());
     }
     
     /**

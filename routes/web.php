@@ -61,5 +61,4 @@ Route::get('/stripe', [StripeController::class, 'index'])->name('stripe.index');
 Route::post('/stripe/checkout', [StripeController::class, 'checkout'])->name('stripe.checkout');
 Route::get('/stripe/success', [StripeController::class, 'success'])->name('stripe.success');
 
-
 require __DIR__.'/auth.php';
