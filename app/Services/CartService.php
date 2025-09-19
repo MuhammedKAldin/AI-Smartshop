@@ -1,21 +1,23 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Services;
 
 use App\Models\Cart;
-use App\Models\CartItem;
 use App\Models\Product;
 use App\Models\StockReservation;
+use Exception;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
 
 class CartService
 {
     /**
      * Get cart items for current user (logged-in or guest).
-     * 
+     *
      * @return array
      */
     public function getCartItems()
@@ -29,46 +31,48 @@ class CartService
 
     /**
      * Add item to cart for current user.
-     * 
-     * @param int $productId
-     * @param int $quantity
+     *
+     * @param  int  $productId
+     * @param  int  $quantity
      * @return array
-     * @throws \Exception
+     *
+     * @throws Exception
      */
     public function addToCart($productId, $quantity = 1)
     {
         try {
             DB::beginTransaction();
-            
+
             // Get product with lock to prevent race conditions
             $product = Product::lockForUpdate()->findOrFail($productId);
-            
+
             // Check if product is in stock
-            if (!$product->in_stock || $product->stock <= 0) {
-                throw new \Exception('Product is out of stock');
+            if (! $product->in_stock || $product->stock <= 0) {
+                throw new Exception('Product is out of stock');
             }
-            
+
             // Check if requested quantity exceeds available stock
             if ($quantity > $product->stock) {
-                throw new \Exception("Only {$product->stock} items available in stock");
+                throw new Exception("Only {$product->stock} items available in stock");
             }
-            
+
             if (Auth::check()) {
                 $result = $this->addToUserCart(Auth::id(), $product, $quantity);
             } else {
                 $result = $this->addToGuestCart($product, $quantity);
             }
-            
+
             DB::commit();
+
             return $result;
-            
-        } catch (\Exception $e) {
+
+        } catch (Exception $e) {
             DB::rollBack();
             Log::error('Add to cart failed', [
                 'product_id' => $productId,
                 'quantity' => $quantity,
                 'user_id' => Auth::id(),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -76,47 +80,49 @@ class CartService
 
     /**
      * Update cart item quantity for current user.
-     * 
-     * @param int $productId
-     * @param int $quantity
+     *
+     * @param  int  $productId
+     * @param  int  $quantity
      * @return array
-     * @throws \Exception
+     *
+     * @throws Exception
      */
     public function updateCartItem($productId, $quantity)
     {
         try {
             DB::beginTransaction();
-            
+
             // Get product with lock to prevent race conditions
             $product = Product::lockForUpdate()->findOrFail($productId);
-            
+
             // Check if product is still in stock (for non-zero quantities)
             if ($quantity > 0) {
-                if (!$product->in_stock || $product->stock <= 0) {
-                    throw new \Exception('Product is out of stock');
+                if (! $product->in_stock || $product->stock <= 0) {
+                    throw new Exception('Product is out of stock');
                 }
-                
+
                 if ($quantity > $product->stock) {
-                    throw new \Exception("Only {$product->stock} items available in stock");
+                    throw new Exception("Only {$product->stock} items available in stock");
                 }
             }
-            
+
             if (Auth::check()) {
                 $result = $this->updateUserCartItem(Auth::id(), $productId, $quantity);
             } else {
                 $result = $this->updateGuestCartItem($productId, $quantity);
             }
-            
+
             DB::commit();
+
             return $result;
-            
-        } catch (\Exception $e) {
+
+        } catch (Exception $e) {
             DB::rollBack();
             Log::error('Update cart item failed', [
                 'product_id' => $productId,
                 'quantity' => $quantity,
                 'user_id' => Auth::id(),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -124,8 +130,8 @@ class CartService
 
     /**
      * Remove item from cart for current user.
-     * 
-     * @param int $productId
+     *
+     * @param  int  $productId
      * @return array
      */
     public function removeFromCart($productId)
@@ -139,7 +145,7 @@ class CartService
 
     /**
      * Clear cart for current user.
-     * 
+     *
      * @return array
      */
     public function clearCart()
@@ -153,14 +159,14 @@ class CartService
 
     /**
      * Sync guest cart to user cart when user logs in.
-     * 
-     * @param int $userId
+     *
+     * @param  int  $userId
      * @return void
      */
     public function syncGuestCartToUser($userId)
     {
         $guestCart = $this->getGuestCartItems();
-        
+
         if (empty($guestCart)) {
             return;
         }
@@ -174,13 +180,13 @@ class CartService
 
             if ($existingItem) {
                 $existingItem->update([
-                    'quantity' => $existingItem->quantity + $item['quantity']
+                    'quantity' => $existingItem->quantity + $item['quantity'],
                 ]);
             } else {
                 $userCart->cartItems()->create([
                     'product_id' => $item['product_id'],
                     'quantity' => $item['quantity'],
-                    'price' => $item['price']
+                    'price' => $item['price'],
                 ]);
             }
         }
@@ -191,14 +197,14 @@ class CartService
 
     /**
      * Get user cart items from database.
-     * 
-     * @param int $userId
+     *
+     * @param  int  $userId
      * @return array
      */
     private function getUserCartItems($userId)
     {
         $cart = $this->getOrCreateUserCart($userId);
-        
+
         return $cart->cartItems()
             ->with('product')
             ->get()
@@ -210,7 +216,7 @@ class CartService
                     'price' => $item->price,
                     'image' => $item->product->image,
                     'quantity' => $item->quantity,
-                    'subtotal' => $item->price * $item->quantity
+                    'subtotal' => $item->price * $item->quantity,
                 ];
             })
             ->toArray();
@@ -218,7 +224,7 @@ class CartService
 
     /**
      * Get guest cart items from session.
-     * 
+     *
      * @return array
      */
     private function getGuestCartItems()
@@ -228,29 +234,29 @@ class CartService
 
     /**
      * Add item to user cart in database.
-     * 
-     * @param int $userId
-     * @param Product $product
-     * @param int $quantity
+     *
+     * @param  int  $userId
+     * @param  Product  $product
+     * @param  int  $quantity
      * @return array
      */
     private function addToUserCart($userId, $product, $quantity)
     {
         $cart = $this->getOrCreateUserCart($userId);
-        
+
         $existingItem = $cart->cartItems()
             ->where('product_id', $product->id)
             ->first();
 
         if ($existingItem) {
             $existingItem->update([
-                'quantity' => $existingItem->quantity + $quantity
+                'quantity' => $existingItem->quantity + $quantity,
             ]);
         } else {
             $cart->cartItems()->create([
                 'product_id' => $product->id,
                 'quantity' => $quantity,
-                'price' => $product->price
+                'price' => $product->price,
             ]);
         }
 
@@ -259,15 +265,15 @@ class CartService
 
     /**
      * Add item to guest cart in session.
-     * 
-     * @param Product $product
-     * @param int $quantity
+     *
+     * @param  Product  $product
+     * @param  int  $quantity
      * @return array
      */
     private function addToGuestCart($product, $quantity)
     {
         $cart = Session::get('cart', []);
-        
+
         $existingIndex = collect($cart)->search(function ($item) use ($product) {
             return $item['id'] === $product->id;
         });
@@ -281,26 +287,27 @@ class CartService
                 'description' => $product->description,
                 'price' => $product->price,
                 'image' => $product->image,
-                'quantity' => $quantity
+                'quantity' => $quantity,
             ];
         }
 
         Session::put('cart', $cart);
+
         return $cart;
     }
 
     /**
      * Update user cart item quantity.
-     * 
-     * @param int $userId
-     * @param int $productId
-     * @param int $quantity
+     *
+     * @param  int  $userId
+     * @param  int  $productId
+     * @param  int  $quantity
      * @return array
      */
     private function updateUserCartItem($userId, $productId, $quantity)
     {
         $cart = $this->getOrCreateUserCart($userId);
-        
+
         if ($quantity <= 0) {
             $cart->cartItems()->where('product_id', $productId)->delete();
         } else {
@@ -314,47 +321,49 @@ class CartService
 
     /**
      * Update guest cart item quantity.
-     * 
-     * @param int $productId
-     * @param int $quantity
+     *
+     * @param  int  $productId
+     * @param  int  $quantity
      * @return array
      */
     private function updateGuestCartItem($productId, $quantity)
     {
         $cart = Session::get('cart', []);
-        
+
         $cart = collect($cart)->map(function ($item) use ($productId, $quantity) {
             if ($item['id'] === $productId) {
                 $item['quantity'] = $quantity;
             }
+
             return $item;
         })->filter(function ($item) {
             return $item['quantity'] > 0;
         })->values()->toArray();
 
         Session::put('cart', $cart);
+
         return $cart;
     }
 
     /**
      * Remove item from user cart.
-     * 
-     * @param int $userId
-     * @param int $productId
+     *
+     * @param  int  $userId
+     * @param  int  $productId
      * @return array
      */
     private function removeFromUserCart($userId, $productId)
     {
         $cart = $this->getOrCreateUserCart($userId);
         $cart->cartItems()->where('product_id', $productId)->delete();
-        
+
         return $this->getUserCartItems($userId);
     }
 
     /**
      * Remove item from guest cart.
-     * 
-     * @param int $productId
+     *
+     * @param  int  $productId
      * @return array
      */
     private function removeFromGuestCart($productId)
@@ -365,38 +374,40 @@ class CartService
         })->values()->toArray();
 
         Session::put('cart', $cart);
+
         return $cart;
     }
 
     /**
      * Clear user cart.
-     * 
-     * @param int $userId
+     *
+     * @param  int  $userId
      * @return array
      */
     private function clearUserCart($userId)
     {
         $cart = $this->getOrCreateUserCart($userId);
         $cart->cartItems()->delete();
-        
+
         return [];
     }
 
     /**
      * Clear guest cart.
-     * 
+     *
      * @return array
      */
     private function clearGuestCart()
     {
         Session::forget('cart');
+
         return [];
     }
 
     /**
      * Get or create user cart.
-     * 
-     * @param int $userId
+     *
+     * @param  int  $userId
      * @return Cart
      */
     private function getOrCreateUserCart($userId)
@@ -406,12 +417,13 @@ class CartService
 
     /**
      * Get cart total for current user.
-     * 
+     *
      * @return float
      */
     public function getCartTotal()
     {
         $items = $this->getCartItems();
+
         return collect($items)->sum(function ($item) {
             return $item['price'] * $item['quantity'];
         });
@@ -419,18 +431,19 @@ class CartService
 
     /**
      * Get cart item count for current user.
-     * 
+     *
      * @return int
      */
     public function getCartItemCount()
     {
         $items = $this->getCartItems();
+
         return collect($items)->sum('quantity');
     }
-    
+
     /**
      * Validate cart items for checkout (check stock availability with reservations).
-     * 
+     *
      * @return array
      */
     public function validateCartForCheckout()
@@ -438,55 +451,56 @@ class CartService
         $cartItems = $this->getCartItems();
         $outOfStockItems = [];
         $insufficientStockItems = [];
-        
+
         foreach ($cartItems as $item) {
             $product = Product::find($item['id']);
-            
-            if (!$product) {
+
+            if (! $product) {
                 $outOfStockItems[] = [
                     'id' => $item['id'],
                     'name' => $item['name'],
-                    'reason' => 'Product not found'
+                    'reason' => 'Product not found',
                 ];
+
                 continue;
             }
-            
+
             // Calculate available stock (total - reserved)
             $reservedQuantity = StockReservation::where('product_id', $item['id'])
                 ->where('status', 'active')
                 ->where('reserved_until', '>', now())
                 ->sum('quantity');
-            
+
             $availableStock = $product->stock - $reservedQuantity;
-            
-            if (!$product->in_stock || $availableStock <= 0) {
+
+            if (! $product->in_stock || $availableStock <= 0) {
                 $outOfStockItems[] = [
                     'id' => $item['id'],
                     'name' => $item['name'],
                     'reason' => 'Out of stock',
-                    'available' => $availableStock
+                    'available' => $availableStock,
                 ];
             } elseif ($item['quantity'] > $availableStock) {
                 $insufficientStockItems[] = [
                     'id' => $item['id'],
                     'name' => $item['name'],
                     'requested' => $item['quantity'],
-                    'available' => $availableStock
+                    'available' => $availableStock,
                 ];
             }
         }
-        
+
         return [
             'valid' => empty($outOfStockItems) && empty($insufficientStockItems),
             'out_of_stock' => $outOfStockItems,
-            'insufficient_stock' => $insufficientStockItems
+            'insufficient_stock' => $insufficientStockItems,
         ];
     }
-    
+
     /**
      * Remove out of stock items from cart.
-     * 
-     * @param array $outOfStockItems
+     *
+     * @param  array  $outOfStockItems
      * @return void
      */
     public function removeOutOfStockItems($outOfStockItems)
@@ -495,11 +509,11 @@ class CartService
             $this->removeFromCart($item['id']);
         }
     }
-    
+
     /**
      * Validate cart stock (alias for validateCartForCheckout).
-     * 
-     * @param array $cartItems
+     *
+     * @param  array  $cartItems
      * @return array
      */
     public function validateCartStock($cartItems)

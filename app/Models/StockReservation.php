@@ -1,10 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Carbon\Carbon;
 
 class StockReservation extends Model
 {
@@ -17,12 +18,12 @@ class StockReservation extends Model
         'quantity',
         'reserved_until',
         'status', // 'active', 'confirmed', 'expired', 'cancelled'
-        'order_token'
+        'order_token',
     ];
 
     protected $casts = [
         'reserved_until' => 'datetime',
-        'quantity' => 'integer'
+        'quantity' => 'integer',
     ];
 
     /**
@@ -47,7 +48,7 @@ class StockReservation extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active')
-                    ->where('reserved_until', '>', now());
+            ->where('reserved_until', '>', now());
     }
 
     /**

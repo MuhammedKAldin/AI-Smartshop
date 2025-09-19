@@ -49,6 +49,27 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi"
+        ],
+        "test": [
+            "@php artisan config:clear --ansi",
+            "vendor\\bin\\phpstan analyze --xdebug --memory-limit=1G",
+            "vendor\\bin\\pint --test",
+            "npx blade-formatter \"./resources/**/*.blade.php\" -c -d"
+        ],
+        "phpstan": [
+            "vendor\\bin\\phpstan analyze --xdebug --memory-limit=1G"
+        ],
+        "pint": [
+            "vendor\\bin\\pint --test"
+        ],
+        "pint-fix": [
+            "vendor\\bin\\pint"
+        ],
+        "blade-format": [
+            "npx blade-formatter \"./resources/**/*.blade.php\" -c -d"
+        ],
+        "blade-format-fix": [
+            "npx blade-formatter \"./resources/**/*.blade.php\" -w"
         ]
     },
     "extra": {

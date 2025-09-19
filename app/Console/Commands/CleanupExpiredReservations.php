@@ -1,9 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
 use App\Services\StockReservationService;
+use Illuminate\Console\Command;
 
 class CleanupExpiredReservations extends Command
 {
@@ -35,11 +37,11 @@ class CleanupExpiredReservations extends Command
     public function handle()
     {
         $this->info('Starting cleanup of expired reservations...');
-        
+
         $cleanedCount = $this->stockReservationService->cleanupExpiredReservations();
-        
+
         $this->info("Cleaned up {$cleanedCount} expired reservations.");
-        
+
         return Command::SUCCESS;
     }
 }

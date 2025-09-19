@@ -1,15 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Product;
 
 class HomeController extends Controller
 {
     /**
      * Display the home page with products.
-     * 
+     *
      * @return \Illuminate\View\View
      */
     public function index()
@@ -19,7 +20,7 @@ class HomeController extends Controller
             ->inStock()
             ->orderBy('created_at', 'desc')
             ->get();
-            
+
         return view('home', compact('products'));
     }
 }

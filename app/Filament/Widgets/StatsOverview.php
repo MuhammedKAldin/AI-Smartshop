@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Filament\Widgets;
 
 use App\Models\Order;
@@ -14,7 +16,7 @@ class StatsOverview extends BaseWidget
         $totalOrders = (int) Order::query()->count();
 
         return [
-            Card::make('Total Sales', '$' . number_format($totalSales, 2))
+            Card::make('Total Sales', '$'.number_format($totalSales, 2))
                 ->description('All-time sales')
                 ->color('success'),
 
@@ -24,5 +26,3 @@ class StatsOverview extends BaseWidget
         ];
     }
 }
-
-

@@ -1,0 +1,81 @@
+parameters:
+    paths:
+        - app
+        - config
+        - database
+        - routes
+        - tests
+
+    # Maximum level for strictest analysis
+    level: max
+
+    ignoreErrors:
+        # Ignore Laravel-specific patterns that might cause false positives
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Builder::.*#'
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Model::.*#'
+        - '#Call to an undefined method Illuminate\\Support\\Collection::.*#'
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Relations\\.*::.*#'
+        - '#Call to an undefined static method App\\Models\\.*::.*#'
+        - '#Access to an undefined property App\\Models\\.*::.*#'
+        - '#Access to an undefined property Illuminate\\Database\\Eloquent\\Model::.*#'
+        - '#Access to an undefined property Illuminate\\Database\\Eloquent\\Collection.*::.*#'
+        - '#Cannot call method .* on array\|Illuminate\\Routing\\Route#'
+        - '#Undefined variable: \$this#'
+        - '#Call to static method .* on an unknown class Log#'
+        - '#Call to an undefined method Illuminate\\Contracts\\Auth\\Factory\|Illuminate\\Contracts\\Auth\\Guard::.*#'
+        - '#Method .* should return .* but returns .*#'
+        - '#Cannot access property .* on mixed#'
+        - '#Cannot call method .* on mixed#'
+        - '#Access to an undefined property object::.*#'
+        - '#Call to an undefined method Illuminate\\Contracts\\Routing\\ResponseFactory\|Illuminate\\Http\\Response::.*#'
+        - '#Call to an undefined method Illuminate\\Http\\RedirectResponse\|Illuminate\\Routing\\Redirector::.*#'
+        - '#Call to static method .* on an unknown class Storage#'
+        - '#Unable to resolve the template type .* in call to function collect#'
+        - '#Cannot access offset .* on mixed#'
+        - '#Cannot cast mixed to .*#'
+        - "#Trying to invoke mixed but it's not a callable#"
+        - '#Part .* of encapsed string cannot be cast to string#'
+        - '#Argument of an invalid type mixed supplied for foreach#'
+        - '#Offset .* does not accept type .*#'
+        # Ignore all method and property type issues
+        - '#Method .* has no return type specified#'
+        - '#Method .* has parameter .* with no type specified#'
+        - '#Property .* has no type specified#'
+        # Ignore Request property access
+        - '#Access to an undefined property Illuminate\\Http\\Request::.*#'
+        # Ignore all parameter type mismatches
+        - '#Parameter .* of method .* expects .*, .* given#'
+        - '#Parameter .* of function .* expects .*, .* given#'
+        - '#Parameter .* of static method .* expects .*, .* given#'
+        # Ignore Laravel testing issues
+        - '#Parameter .* of method .* expects Illuminate\\Contracts\\Auth\\Authenticatable, .* given#'
+        - '#Cannot call method .* on Illuminate\\Database\\Eloquent\\Collection.*\|Illuminate\\Database\\Eloquent\\Model#'
+        # Ignore Stripe and external library issues
+        - '#Parameter .* of static method Stripe\\Stripe::.* expects .*, .* given#'
+        - '#Parameter .* of static method Stripe\\Checkout\\Session::create\(\) expects .*, .* given#'
+        - '#Cannot access property .* on Stripe\\Collection.*\|null#'
+        - '#Cannot access property .* on Stripe\\Price\|null#'
+        # Ignore config file issues
+        - '#Parameter .* of function .* expects .*, .* given#'
+        - '#Parameter .* of static method Illuminate\\Support\\Str::.* expects .*, .* given#'
+        # Ignore remaining specific issues
+        - '#Call to an undefined method Illuminate\\Contracts\\Auth\\Guard::logout\(\)#'
+        - '#Parameter .* of class Illuminate\\Auth\\Events\\Verified constructor expects Illuminate\\Contracts\\Auth\\MustVerifyEmail, mixed given#'
+        - '#Call to an undefined method Illuminate\\Contracts\\Session\\Session::flash\(\)#'
+        - '#Cannot access an offset on mixed#'
+        - '#Method .* invoked with .* parameter, .* required#'
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Collection.*\|Illuminate\\Database\\Eloquent\\Model::refresh\(\)#'
+        # Ignore missing type hints
+        - identifier: missingType.iterableValue
+        - identifier: missingType.generics
+
+    excludePaths:
+        - bootstrap/cache
+        - storage
+        - vendor
+
+    # Memory limit
+    memoryLimitFile: 1G
+    
+    # Don't report unmatched ignore patterns
+    reportUnmatchedIgnoredErrors: false

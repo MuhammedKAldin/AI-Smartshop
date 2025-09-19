@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Filament\Pages;
 
 use App\Filament\Widgets\RecentOrders;
@@ -16,5 +18,3 @@ class Dashboard extends BaseDashboard
         ];
     }
 }
-
-

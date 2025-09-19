@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -54,6 +56,6 @@ class Order extends Model
     // Helper methods
     public function generateOrderNumber()
     {
-        return 'ORD-' . strtoupper(uniqid());
+        return 'ORD-'.strtoupper(uniqid());
     }
 }

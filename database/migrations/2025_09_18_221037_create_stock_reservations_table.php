@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -21,7 +23,7 @@ return new class extends Migration
             $table->enum('status', ['active', 'confirmed', 'expired', 'cancelled'])->default('active');
             $table->string('order_token')->nullable();
             $table->timestamps();
-            
+
             // Indexes for performance
             $table->index(['product_id', 'status']);
             $table->index(['user_id', 'status']);

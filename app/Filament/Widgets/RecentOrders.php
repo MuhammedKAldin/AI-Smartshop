@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Filament\Widgets;
 
 use App\Models\Order;
@@ -48,5 +50,3 @@ class RecentOrders extends BaseWidget
         return true;
     }
 }
-
- 

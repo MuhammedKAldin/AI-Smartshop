@@ -1,15 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
-use App\Services\StockReservationService;
 use App\Models\Product;
 use App\Models\StockReservation;
+use App\Services\StockReservationService;
+use Exception;
+use Illuminate\Console\Command;
 
 class TestConcurrencyScenario extends Command
 {
     protected $signature = 'test:concurrency {product_id=1}';
+
     protected $description = 'Test 6 users trying to buy 1 item';
 
     protected $stockReservationService;
@@ -24,9 +28,10 @@ class TestConcurrencyScenario extends Command
     {
         $productId = $this->argument('product_id');
         $product = Product::find($productId);
-        
-        if (!$product) {
+
+        if (! $product) {
             $this->error("Product {$productId} not found");
+
             return;
         }
 
@@ -37,10 +42,10 @@ class TestConcurrencyScenario extends Command
 
         // Simulate 6 users trying to reserve 1 item each
         $results = [];
-        
+
         for ($i = 1; $i <= 6; $i++) {
             $this->info("User {$i} attempting reservation...");
-            
+
             try {
                 $reservation = $this->stockReservationService->reserveStock(
                     $productId,
@@ -49,43 +54,43 @@ class TestConcurrencyScenario extends Command
                     $i,
                     "session_{$i}"
                 );
-                
+
                 $results[] = [
                     'user' => $i,
                     'status' => 'SUCCESS',
                     'reservation_id' => $reservation->id,
-                    'available_after' => $this->stockReservationService->getAvailableStock($productId)
+                    'available_after' => $this->stockReservationService->getAvailableStock($productId),
                 ];
-                
+
                 $this->info("✅ User {$i}: SUCCESS - Reservation ID: {$reservation->id}");
-                
-            } catch (\Exception $e) {
+
+            } catch (Exception $e) {
                 $results[] = [
                     'user' => $i,
                     'status' => 'FAILED',
                     'error' => $e->getMessage(),
-                    'available_after' => $this->stockReservationService->getAvailableStock($productId)
+                    'available_after' => $this->stockReservationService->getAvailableStock($productId),
                 ];
-                
+
                 $this->error("❌ User {$i}: FAILED - {$e->getMessage()}");
             }
         }
 
         $this->line('');
         $this->info('=== RESULTS SUMMARY ===');
-        
+
         $successCount = collect($results)->where('status', 'SUCCESS')->count();
         $failedCount = collect($results)->where('status', 'FAILED')->count();
-        
+
         $this->info("✅ Successful reservations: {$successCount}");
         $this->info("❌ Failed reservations: {$failedCount}");
         $this->info("📦 Final available stock: {$this->stockReservationService->getAvailableStock($productId)}");
-        
+
         // Show active reservations
         $activeReservations = StockReservation::where('product_id', $productId)
             ->where('status', 'active')
             ->get();
-            
+
         $this->line('');
         $this->info('=== ACTIVE RESERVATIONS ===');
         foreach ($activeReservations as $reservation) {
