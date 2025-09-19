@@ -81,32 +81,74 @@ if (preg_match('/\[(\d+(?:,\s*\d+)*)\]/', $aiResponse, $matches)) {
 }
 ```
 
-### 5. Fallback Algorithm
-When AI is unavailable or fails, the system uses a simple rule-based approach:
+### 5. Authentication-Based Logic
+The system first checks if the user is logged in:
 
-**Category-Based Recommendations:**
+**Guest Users (Not Logged In):**
+- Automatically uses fallback recommendations
+- No AI processing for non-authenticated users
+- Returns random or category-based products
+
+**Logged-In Users:**
+- Attempts AI-powered recommendations first
+- Falls back to algorithm-based recommendations if AI fails
+
+### 6. Fallback Algorithm
+When AI is unavailable, fails, or for guest users, the system uses context-aware algorithms:
+
+**Product View Context:**
 ```php
-// Get 2 products from same category
-$recommendations = collect($allProducts)
-    ->where('category', $category)
-    ->where('id', '!=', $productId)
-    ->take(2)
-    ->values()
-    ->toArray();
+// For product detail pages, prioritize same category
+if ($context === 'product_view' && $category && $productId) {
+    $categoryProducts = collect($allProducts)
+        ->where('category', $category)
+        ->where('id', '!=', $productId)
+        ->values()
+        ->toArray();
+    
+    if (count($categoryProducts) >= 4) {
+        // Use only category products if enough available
+        $recommendations = collect($categoryProducts)->random(4);
+    } else {
+        // Use all available category products
+        $recommendations = $categoryProducts;
+    }
+}
 ```
 
-**Random Fill:**
+**Other Contexts (Homepage, Cart):**
 ```php
+// Get 2 products from same category (if available)
+if ($category) {
+    $recommendations = collect($allProducts)
+        ->where('category', $category)
+        ->where('id', '!=', $productId)
+        ->take(2)
+        ->values()
+        ->toArray();
+}
+
 // Fill remaining slots with random products
 $remaining = 4 - count($recommendations);
-$randomProducts = collect($allProducts)
-    ->where('id', '!=', $productId)
-    ->random($remaining)
-    ->values()
-    ->toArray();
+if ($remaining > 0) {
+    $randomProducts = collect($allProducts)
+        ->where('id', '!=', $productId)
+        ->random($remaining)
+        ->values()
+        ->toArray();
+    $recommendations = array_merge($recommendations, $randomProducts);
+}
 ```
 
-### 6. Page-Specific Usage
+**Database Fallback:**
+```php
+// If no products available, get random from database
+if (empty($allProducts)) {
+    $recommendations = Product::inRandomOrder()->take(4)->get()->toArray();
+}
+```
+
+### 7. Page-Specific Usage
 
 **Homepage (`/`):**
 - Calls `/ai/recommendations` with no specific context
@@ -123,7 +165,7 @@ $randomProducts = collect($allProducts)
 - AI recommends items that complement cart contents
 - Fallback: Random products
 
-### 7. Response Format
+### 8. Response Format
 ```json
 {
     "recommendations": [
@@ -138,22 +180,24 @@ $randomProducts = collect($allProducts)
             "rating": 4.5
         }
     ],
-    "source": "ai" // or "fallback"
+    "source": "ai", // or "fallback"
+    "personalized": true, // or false for fallback
+    "algorithm": "category_random" // for fallback responses
 }
 ```
 
-### 8. Error Handling
+### 9. Error Handling
 - **API Key Missing**: Automatically falls back to rule-based recommendations
 - **API Failure**: Catches exceptions and uses fallback algorithm
 - **Invalid Response**: Parses AI response, falls back if no valid IDs found
 - **Empty Results**: Ensures at least 4 recommendations are always returned
 
-### 9. Performance Optimizations
+### 10. Performance Optimizations
 - **Database Query**: Only selects needed columns, filters in-stock products
 - **Response Caching**: Could be implemented for frequently accessed recommendations
 - **Fallback Speed**: Rule-based algorithm provides instant results when AI fails
 
-### 10. Frontend Integration
+### 11. Frontend Integration
 **Alpine.js Implementation:**
 ```javascript
 // Load recommendations on page init
@@ -171,11 +215,13 @@ this.recommendations = data.recommendations || [];
 ```
 
 ## Key Features
+- **Authentication-Aware**: AI recommendations for logged-in users, fallback for guests
 - **Context-Aware**: Adapts recommendations based on current page and user state
 - **Resilient**: Always provides recommendations even when AI fails
 - **Fast Fallback**: Rule-based algorithm ensures quick response times
 - **Flexible**: Works across homepage, product pages, and cart
 - **Scalable**: Can handle large product catalogs efficiently
+- **Personalized**: Comprehensive user profiling for logged-in users
 
 ## ✅ AI Smart Recommendation System - Requirement Verification
 
