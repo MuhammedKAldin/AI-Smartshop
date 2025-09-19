@@ -287,7 +287,6 @@ GEMINI_API_KEY=AIzaSyxxx
 
 ### Frontend Optimizations
 - Minified CSS and JavaScript
-- Image optimization and lazy loading
 - Alpine.js for minimal JavaScript footprint
 
 ## 🧪 Code Quality & Styling
