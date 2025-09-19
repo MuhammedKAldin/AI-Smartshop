@@ -4,6 +4,9 @@ namespace Database\Seeders;
 
 use App\Models\Product;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProductSeeder extends Seeder
 {
@@ -627,7 +630,44 @@ class ProductSeeder extends Seeder
         ];
 
         foreach ($products as $product) {
+            // Download image from URL and store locally
+            $imageUrl = $product['image'];
+            $imagePath = $this->downloadImage($imageUrl);
+            
+            // Update product data with local image path
+            $product['image'] = $imagePath;
+            
             Product::create($product);
+        }
+    }
+
+    /**
+     * Download image from URL and store it locally
+     */
+    private function downloadImage(string $url): string
+    {
+        try {
+            // Get image content
+            $response = Http::timeout(30)->get($url);
+            
+            if (!$response->successful()) {
+                throw new \Exception("Failed to download image from: {$url}");
+            }
+            
+            // Generate unique filename
+            $extension = pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'jpg';
+            $filename = Str::random(40) . '.' . $extension;
+            $path = 'products/' . $filename;
+            
+            // Store image in public disk
+            Storage::disk('public')->put($path, $response->body());
+            
+            return $path;
+            
+        } catch (\Exception $e) {
+            // Fallback: create a placeholder image path
+            \Log::warning("Failed to download image: {$url}. Error: {$e->getMessage()}");
+            return 'products/placeholder.jpg';
         }
     }
 }
