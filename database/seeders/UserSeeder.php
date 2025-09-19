@@ -48,5 +48,13 @@ class UserSeeder extends Seeder
             'is_admin' => false,
             'email_verified_at' => now(),
         ]);
+
+        User::create([
+            'name' => 'mohamed kamal',
+            'email' => 'moha@gmail.com',
+            'password' => Hash::make('password'),
+            'is_admin' => false,
+            'email_verified_at' => now(),
+        ]);
     }
 }

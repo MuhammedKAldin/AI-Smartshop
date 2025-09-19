@@ -5,7 +5,7 @@ A modern, AI-powered e-commerce platform built with Laravel, Alpine.js, and Tail
 ## 🚀 Features
 
 ### Core E-Commerce Features
-- **Product Catalog**: 50+ diverse products across multiple categories
+- **Product Catalog**: 50 diverse products across multiple categories
 - **Shopping Cart**: Persistent cart with real-time updates
 - **Checkout Process**: Secure Stripe payment integration
 - **User Management**: Customer and admin accounts
@@ -17,7 +17,7 @@ A modern, AI-powered e-commerce platform built with Laravel, Alpine.js, and Tail
 - **Context-Aware Suggestions**: Recommendations based on viewing history and cart contents
 
 ### Technical Features
-- **Responsive Design**: Mobile-first approach with Tailwind CSS
+- **Responsive Design**: Built with Tailwind CSS
 - **Real-time Updates**: Alpine.js for dynamic interactions
 - **Database Optimization**: N+1 query prevention with eager loading
 - **Admin Panel**: Filament-based admin interface
@@ -62,37 +62,30 @@ php artisan key:generate
 Edit `.env` file with your configuration:
 
 ```env
-# Database Configuration
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://yourdomain.com
+
+# Database
 DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=ai_smartshop
-DB_USERNAME=your_username
-DB_PASSWORD=your_password
+DB_HOST=your_db_host
+DB_DATABASE=your_db_name
+DB_USERNAME=your_db_user
+DB_PASSWORD=your_db_password
 
-# Stripe Configuration
-STRIPE_KEY=your_stripe_public_key
-STRIPE_SECRET=your_stripe_secret_key
+# Stripe
+STRIPE_SK=sk_test_xxx
+STRIPE_PK=pk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
 
-# Google Gemini AI Configuration
-GEMINI_API_KEY=your_gemini_api_key
-
-# Mail Configuration (for notifications)
-MAIL_MAILER=smtp
-MAIL_HOST=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USERNAME=your_email@gmail.com
-MAIL_PASSWORD=your_app_password
-MAIL_ENCRYPTION=tls
+# Gemini AI
+GEMINI_API_KEY=AIzaSyxxx
 ```
 
 ### 5. Database Setup
 ```bash
-# Run migrations
-php artisan migrate
-
-# Seed the database with sample data
-php artisan db:seed
+# Run migrations with database Seed 
+php artisan migrate:fresh --seed
 ```
 
 ### 6. Build Assets
@@ -132,6 +125,9 @@ The application comes with pre-configured test accounts:
 - **Email**: mike@smartshop.com
 - **Password**: password
 
+- **Email**: moha@gmail.com
+- **Password**: password
+
 ## 🧠 AI Recommendation Algorithm
 
 ### Overview
@@ -160,31 +156,7 @@ $context = [
 - **Prompt Engineering**: Carefully crafted prompts for consistent results
 - **Product Matching**: AI analyzes product features, categories, and tags
 - **Personalization**: Considers user behavior patterns
-- **Fallback System**: Database-based recommendations if AI fails
-
-#### 4. Recommendation Types
-
-**Product View Recommendations**:
-- Similar products based on category and tags
-- Complementary items frequently bought together
-- Popular items in the same price range
-
-**Cart-Based Recommendations**:
-- Items that complete the current cart
-- Frequently bought together suggestions
-- Cross-category recommendations
-
-**Homepage Recommendations**:
-- Trending products
-- Personalized based on user history
-- New arrivals and featured items
-
-#### 5. Fallback Algorithm
-When AI is unavailable, the system uses:
-- Category-based filtering
-- Price range matching
-- Popularity scoring
-- Random selection for variety
+- **Fallback System**: Database-based recommendations if AI fails (On page view, would display random products of current product category)
 
 ### Implementation Details
 
@@ -238,19 +210,22 @@ public function recommendations(Request $request)
 ```
 resources/views/
 ├── layouts/
-│   └── app.blade.php          # Main layout
+│   ├── app.blade.php          # Main layout
+│   ├── guest.blade.php        # Guest layout
+│   └── navigation.blade.php   # Navigation component
 ├── home.blade.php             # Landing page
 ├── products/
 │   └── show.blade.php         # Product detail
 ├── cart/
 │   └── index.blade.php        # Shopping cart
-└── checkout/
-    └── index.blade.php        # Checkout process
+├── checkout/
+│   └── index.blade.php        # Checkout process
+├── auth/                      # Authentication views
+└── profile/                   # User profile management
 ```
 
 ### Alpine.js Components
 - **Cart Management**: Add/remove items, quantity updates
-- **Search & Filter**: Real-time product filtering
 - **Recommendations**: Dynamic AI-powered suggestions
 - **Notifications**: Toast messages and alerts
 
@@ -272,11 +247,6 @@ $products = Product::select(['id', 'name', 'price', 'image'])
 - AI recommendations indexed by user_id and created_at
 - Products indexed by category and in_stock status
 
-### Caching Strategy
-- AI recommendations cached for 24 hours
-- Product data cached for 1 hour
-- User cart data stored in session
-
 ## 🚀 Deployment
 
 ### Production Checklist
@@ -285,8 +255,7 @@ $products = Product::select(['id', 'name', 'price', 'image'])
 3. Set up Stripe webhook endpoints
 4. Configure email settings for notifications
 5. Set up SSL certificate
-6. Configure queue workers for background jobs
-7. Set up monitoring and logging
+6. Set up monitoring and logging
 
 ### Environment Variables
 ```env
@@ -302,11 +271,12 @@ DB_USERNAME=your_db_user
 DB_PASSWORD=your_db_password
 
 # Stripe
-STRIPE_KEY=pk_live_...
-STRIPE_SECRET=sk_live_...
+STRIPE_SK=sk_test_xxx
+STRIPE_PK=pk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
 
 # Gemini AI
-GEMINI_API_KEY=your_production_api_key
+GEMINI_API_KEY=AIzaSyxxx
 ```
 
 ## 📊 Performance Optimization
@@ -314,62 +284,24 @@ GEMINI_API_KEY=your_production_api_key
 ### Database Optimizations
 - Proper indexing on frequently queried columns
 - Eager loading to prevent N+1 queries
-- Query result caching
-- Database connection pooling
 
 ### Frontend Optimizations
 - Minified CSS and JavaScript
 - Image optimization and lazy loading
-- CDN for static assets
 - Alpine.js for minimal JavaScript footprint
 
-### Caching Strategy
-- Redis for session storage
-- File-based caching for product data
-- Browser caching for static assets
-- API response caching
+## 🧪 Code Quality & Styling
 
-## 🧪 Testing
-
-### Running Tests
+### Running Code Quality Checks
 ```bash
-# Run all tests
-php artisan test
+# Run all code quality checks
+composer test
 
-# Run specific test suite
-php artisan test --testsuite=Feature
-
-# Run with coverage
-php artisan test --coverage
+# Individual checks
+composer phpstan    # Static analysis (MAX level)
+composer pint       # Code style check
+composer blade-format # Blade template formatting check
 ```
-
-### Test Coverage
-- Authentication and authorization
-- Product management
-- Cart functionality
-- Order processing
-- AI recommendation system
-- Payment integration
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue in the repository
-- Contact: support@smartshop.com
-- Documentation: [Link to docs]
 
 ## 🔄 Changelog
 
@@ -379,8 +311,9 @@ For support and questions:
 - AI-powered recommendations
 - Stripe payment integration
 - Admin panel
-- 50+ sample products
+- 50 sample products
 - Responsive design
+- Code quality tools (PHPStan, Laravel Pint, Blade Formatter)
 
 ---
 
