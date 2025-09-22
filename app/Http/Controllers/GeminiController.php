@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 class GeminiController extends Controller
 {
-    // Simple GET endpoint: /ai?prompt=...
+    // Pinging-Gemini-API-Simple GET endpoint: /ai?prompt=...
     public function ai(Request $request)
     {
         try {
@@ -55,7 +55,7 @@ class GeminiController extends Controller
 
             return response()->json($responseData);
         } catch (Exception $e) {
-            Log::error('Gemini API Error: '.$e->getMessage());
+            Log::error('❌ Gemini API Error: '.$e->getMessage());
 
             return response()->json([
                 'error' => 'Failed to get response AI',
@@ -105,6 +105,7 @@ class GeminiController extends Controller
             ];
 
             // Get AI recommendations
+            Log::info('🤖💡 : AI Recommendations', ['requestData' => $requestData, 'aiContext' => $aiContext]);
             $apiKey = config('ai.gemini.api_key');
             if (! $apiKey) {
                 // Export fallback call
@@ -136,19 +137,46 @@ class GeminiController extends Controller
             // Extract AI response
             $aiResponse = config('ai.model.extract_response_content')($responseData);
 
+            // Normalize to plain text content
+            $aiText = null;
+            if ($aiResponse instanceof \Illuminate\Http\JsonResponse) {
+                $aiData = $aiResponse->getData(true);
+                $aiText = $aiData['content'] ?? null;
+            } elseif (is_array($aiResponse) && isset($aiResponse['content'])) {
+                $aiText = $aiResponse['content'];
+            } elseif (is_string($aiResponse)) {
+                $aiText = $aiResponse;
+            }
+
+            Log::info('✅💡 : AI Response (normalized)', ['aiText' => $aiText]);
+
             // Parse AI response to get product IDs
             $recommendedIds = [];
-            if (is_string($aiResponse)) {
-                // Try to extract JSON array from response
-                if (preg_match('/\[(\d+(?:,\s*\d+)*)\]/', $aiResponse, $matches)) {
-                    $recommendedIds = array_map('intval', explode(',', $matches[1]));
+            if (is_string($aiText) && $aiText !== '') {
+                // Strip markdown code fences and language hints
+                $cleanText = trim($aiText);
+                $cleanText = preg_replace('/^```[a-zA-Z]*\n?/', '', $cleanText);
+                $cleanText = preg_replace('/```\s*$/', '', $cleanText);
+                $cleanText = trim($cleanText);
+
+                // Try strict JSON decode first
+                $decoded = json_decode($cleanText, true);
+                if (is_array($decoded)) {
+                    $recommendedIds = array_values(array_filter(array_map('intval', $decoded)));
+                }
+
+                // Fallback: extract numbers from a bracketed list
+                if (empty($recommendedIds)) {
+                    if (preg_match('/\[(\s*\d+(?:\s*,\s*\d+)*)\]/', $cleanText, $matches)) {
+                        $recommendedIds = array_map('intval', preg_split('/\s*,\s*/', $matches[1]));
+                    }
                 }
             }
 
             // Prepare response data for export
             $exportResponseData = [
                 'raw_response' => $responseData,
-                'extracted_response' => $aiResponse,
+                'extracted_response' => $aiText,
                 'parsed_product_ids' => $recommendedIds,
                 'success' => ! empty($recommendedIds),
             ];
@@ -163,7 +191,7 @@ class GeminiController extends Controller
 
             // If AI didn't return valid IDs, use fallback
             if (empty($recommendedIds)) {
-                Log::warning('AI returned no valid product IDs, using fallback', [
+                Log::warning('❌ AI returned no valid product IDs, using fallback', [
                     'ai_response' => $aiResponse,
                     'export_path' => $exportPath,
                 ]);
@@ -185,7 +213,7 @@ class GeminiController extends Controller
             ]);
 
         } catch (Exception $e) {
-            Log::error('AI Recommendations Error: '.$e->getMessage());
+            Log::error('❌ AI Recommendations Error: '.$e->getMessage());
 
             // Export error call
             $requestData = [
@@ -229,7 +257,7 @@ class GeminiController extends Controller
         $aiContext .= "USER PROFILE:\n";
         $aiContext .= "User ID: {$userId}\n";
         $aiContext .= 'Preferred Categories: '.implode(', ', $userProfile['preferred_categories'])."\n";
-        $aiContext .= 'Average Purchase Price: $'.number_format($userProfile['avg_purchase_price'], 2)."\n";
+        $aiContext .= 'Average Purchase Price: $'.number_format((float) $userProfile['avg_purchase_price'], 2)."\n";
         $aiContext .= "Total Orders: {$userProfile['total_orders']}\n";
         $aiContext .= 'Recent Browsing: '.implode(', ', $userProfile['recent_views'])."\n\n";
 
@@ -241,7 +269,7 @@ class GeminiController extends Controller
                 $aiContext .= "Name: {$currentProduct['name']}\n";
                 $aiContext .= "Description: {$currentProduct['description']}\n";
                 $aiContext .= "Category: {$currentProduct['category']}\n";
-                $aiContext .= 'Price: $'.number_format($currentProduct['price'], 2)."\n";
+                $aiContext .= 'Price: $'.number_format((float) $currentProduct['price'], 2)."\n";
                 $aiContext .= 'Tags: '.implode(', ', $currentProduct['tags'])."\n\n";
             }
         }
@@ -250,7 +278,7 @@ class GeminiController extends Controller
         if (! empty($cartItems)) {
             $aiContext .= "CART CONTENTS:\n";
             foreach ($cartItems as $item) {
-                $aiContext .= "- {$item['name']} (Qty: {$item['quantity']}, Price: $".number_format($item['price'], 2).")\n";
+                $aiContext .= "- {$item['name']} (Qty: {$item['quantity']}, Price: $".number_format((float) $item['price'], 2).")\n";
             }
             $aiContext .= "\n";
         }
@@ -259,7 +287,7 @@ class GeminiController extends Controller
         if (! empty($userProfile['purchase_history'])) {
             $aiContext .= "PURCHASE HISTORY:\n";
             foreach ($userProfile['purchase_history'] as $purchase) {
-                $aiContext .= "- {$purchase['name']} (Category: {$purchase['category']}, Price: $".number_format($purchase['price'], 2).")\n";
+                $aiContext .= "- {$purchase['name']} (Category: {$purchase['category']}, Price: $".number_format((float) $purchase['price'], 2).")\n";
             }
             $aiContext .= "\n";
         }
@@ -273,7 +301,7 @@ class GeminiController extends Controller
         // Available Products
         $aiContext .= "AVAILABLE PRODUCTS:\n";
         foreach ($allProducts as $product) {
-            $aiContext .= "- {$product['name']} (ID: {$product['id']}) - {$product['description']} - Category: {$product['category']} - Price: $".number_format($product['price'], 2).' - Tags: '.implode(', ', $product['tags'])."\n";
+            $aiContext .= "- {$product['name']} (ID: {$product['id']}) - {$product['description']} - Category: {$product['category']} - Price: $".number_format((float) $product['price'], 2).' - Tags: '.implode(', ', $product['tags'])."\n";
         }
 
         $aiContext .= "\nRecommendation Context: {$context}\n";

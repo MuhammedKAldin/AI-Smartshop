@@ -6,6 +6,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Product;
+use App\Filament\Columns\PublicStorageImageColumn;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -62,9 +63,8 @@ class ProductResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\ImageColumn::make('image')
+                PublicStorageImageColumn::make('image')
                     ->label('Image')
-                    ->disk('public')
                     ->square(),
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()

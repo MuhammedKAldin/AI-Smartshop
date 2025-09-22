@@ -23,4 +23,19 @@ class EditProduct extends EditRecord
             Actions\DeleteAction::make(),
         ];
     }
+
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        if (! empty($data['image'])) {
+            $path = ltrim((string) $data['image'], '/');
+
+            if (str_starts_with($path, 'storage/')) {
+                $path = substr($path, strlen('storage/'));
+            }
+
+            $data['image'] = $path;
+        }
+
+        return $data;
+    }
 }

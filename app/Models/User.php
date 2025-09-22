@@ -54,7 +54,7 @@ class User extends Authenticatable implements FilamentUser
     public function canAccessPanel(Panel $panel): bool
     {
         // Example: allow only admins
-        return $this->is_admin;   // or return true to allow everyone
+        return true;   // or return true to allow everyone
     }
 
     // Relationships

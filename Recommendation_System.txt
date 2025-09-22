@@ -1,0 +1,32 @@
+the AI recommendation flow end-to-end in the controller, config, and export service. Now I’ll summarize exactly what it does to produce relevant recommendations.
+For a logged-in user:
+1) Loads all in-stock products with fields needed for ranking.
+2) Builds a rich user profile: preferred categories, average purchase price, total orders, recent views, recent purchase history, and similar-user patterns.
+3) Adds current context: page context (homepage/product/cart), current product details (if any), and cart contents (if any).
+4) Appends a full “AVAILABLE PRODUCTS” list, each with ID, name, description, category, price, tags.
+5) Constructs one comprehensive prompt asking Gemini to return 4 product IDs only, as a JSON array like [1, 2, 3, 4].
+6) Calls Gemini with that prompt using the configured model/endpoint.
+7) Extracts text content from the Gemini response via config('ai.model.extract_response_content').
+8) Parses product IDs from the text by locating a JSON-like array; turns them into integers.
+9) If IDs were parsed, fetches those products (max 4) and returns them to the client with source=ai and personalized=true.
+10) Logs/exports both the request prompt and the AI response to storage/app/gemini_calls and storage/app/gemini_response for traceability, and records the generation in ai_recommendations.
+If Gemini is unavailable or returns no valid IDs:
+1) Falls back to a simple algorithm:
+On product pages: prefer same-category products (excluding the current product); randomize if enough candidates exist.
+On other contexts: mix category-based picks (if known) with random products to fill remaining slots.
+2) Returns up to 4 products with source=fallback and personalized=false.
+3) Exports the fallback request/response and notes the algorithm used.
+For logged-out users:
+1) Skips personalization immediately and uses the fallback algorithm above.
+2) Still exports the call for observability.
+Observability and safety:
+Every AI/fallback attempt is exported with request/response artifacts and metadata (user agent, IP, session).
+Failures are logged; recommendation events are tracked in ai_recommendations.
+Key relevance signals used for better recommendations:
+User purchase/browsing history and category affinity.
+Current product context and cart composition.
+Similar-user purchase patterns.
+Full catalog awareness with categories, tags, and prices.
+Strict prompt asking for product IDs only, enabling deterministic matching.
+Summary:
+Your /ai ping shows Gemini connectivity is OK. The recommendation flow builds a detailed user+context prompt, calls Gemini for 4 product IDs, validates/parses the IDs, and returns those products. If Gemini fails or is missing, it falls back to a category/random-based algorithm. All calls are exported for auditing, and successful AI results are tracked for analytics.
